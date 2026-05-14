@@ -1,0 +1,134 @@
+# Git Workbench
+
+Cross-platform desktop Git client built with Tauri, React, Bun, and strict quality gates.
+
+Git Workbench is intended to become a fast, clear alternative to Fork with strong local Git workflows, transparent command output, safe operation previews, and provider support for GitHub, GitLab.com, and self-hosted GitLab instances.
+
+## Current Status
+
+Implemented on `main`:
+
+- Tauri 2 + React + Bun application scaffold.
+- shadcn-based UI preset and three-column workbench shell.
+- Strict frontend checks with TypeScript, Oxlint, and Vitest.
+- Strict Rust checks with rustfmt, Clippy, and crate-level deny rules.
+- Conventional commit enforcement with Husky and Commitlint.
+- Repository path open/refresh flow.
+- Recent repositories stored in localStorage.
+- Real Git status through Tauri commands.
+- Porcelain v2 `-z` status parsing for paths with spaces, renames, copies, conflicts, untracked files, and ignored files.
+- File diff loading for staged and worktree changes.
+- File-level stage and unstage.
+- Commit composer with summary, optional body, amend toggle, and staged-change validation.
+- Commit, fetch, pull, and push through the system `git`.
+- Latest operation result/error panel with command, stdout, and stderr.
+- Browser fallback client for Vite smoke testing outside the Tauri runtime.
+
+Not implemented yet:
+
+- Hunk-level staging.
+- Branch list, checkout, creation, and deletion.
+- Stash workflow.
+- Commit history and branch graph.
+- Provider account setup and PR/MR views.
+- Merge/rebase preview and conflict recovery.
+
+See [docs/roadmap.md](docs/roadmap.md) for the active roadmap.
+
+## Requirements
+
+- Bun 1.3.x
+- Rust stable toolchain
+- System `git`
+- Platform requirements for Tauri 2
+
+The app uses the user's existing Git setup for SSH agents, credential helpers, remotes, VPN-specific access, and self-hosted GitLab transport.
+
+## Setup
+
+```bash
+bun install
+```
+
+## Development
+
+Run the frontend in a browser with the non-mutating fallback client:
+
+```bash
+bun run dev
+```
+
+Run the desktop app through Tauri:
+
+```bash
+bun run tauri:dev
+```
+
+Build the frontend:
+
+```bash
+bun run build
+```
+
+Build the desktop app:
+
+```bash
+bun run tauri:build
+```
+
+## Quality Gates
+
+Frontend:
+
+```bash
+bun run check:front
+bun run build
+```
+
+Rust backend:
+
+```bash
+cd src-tauri
+cargo test
+cargo fmt -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+Frontend non-null assertions are blocked by Oxlint. Rust code denies unsafe code, unwrap/expect, panic-style control flow, debug macros, and stdout/stderr prints in app code.
+
+## GitHub Workflow
+
+The GitHub repository uses a ruleset that requires pull requests for `main`. Work should land through feature branches and PRs.
+
+Commit messages must follow Conventional Commits, for example:
+
+```bash
+feat: add branch checkout command
+fix: handle untracked binary diffs
+docs: update roadmap progress
+```
+
+## Project Structure
+
+```text
+src/
+  app/                    React workbench shell
+  components/ui/          shadcn-generated UI components
+  features/repository/    Frontend repository DTOs, helpers, and Tauri client
+src-tauri/
+  src/git/                Rust system Git command boundary
+  src/lib.rs              Tauri command registration
+docs/
+  roadmap.md              Active product roadmap and progress
+```
+
+## Next Milestone
+
+The next milestone is daily branch workflow support:
+
+- Branch list.
+- Branch checkout.
+- Branch creation.
+- Branch deletion rules.
+- Stash basics.
+- Persistent command log.
