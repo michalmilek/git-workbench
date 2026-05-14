@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::operation_error::OperationError;
+use crate::{git::command::run_git, operation_error::OperationError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +41,10 @@ pub enum GitFileStatus {
 ///
 /// Returns an operation error when branch divergence or file status records are malformed.
 pub fn parse_status_output(output: &str) -> Result<RepositoryStatus, OperationError> {
+    if output.contains('\0') {
+        return parse_z_status_output(output);
+    }
+
     let mut branch = None;
     let mut upstream = None;
     let mut ahead = 0;
@@ -88,27 +92,63 @@ pub fn parse_status_output(output: &str) -> Result<RepositoryStatus, OperationEr
 pub fn read_repository_status(
     repository_path: &std::path::Path,
 ) -> Result<RepositoryStatus, OperationError> {
-    let output = std::process::Command::new("git")
-        .args(["status", "--porcelain=v2", "--branch"])
-        .current_dir(repository_path)
-        .output()
-        .map_err(|error| {
-            OperationError::command(
-                "failed to run git status",
-                "git status --porcelain=v2 --branch",
-                error.to_string(),
-            )
-        })?;
+    let args = vec![
+        String::from("status"),
+        String::from("--porcelain=v2"),
+        String::from("--branch"),
+        String::from("-z"),
+    ];
+    let output = run_git(repository_path, &args)?;
+    parse_status_output(&output.stdout)
+}
 
-    if !output.status.success() {
-        return Err(OperationError::command(
-            "git status failed",
-            "git status --porcelain=v2 --branch",
-            String::from_utf8_lossy(&output.stderr).into_owned(),
-        ));
+fn parse_z_status_output(output: &str) -> Result<RepositoryStatus, OperationError> {
+    let mut branch = None;
+    let mut upstream = None;
+    let mut ahead = 0;
+    let mut behind = 0;
+    let mut files = Vec::new();
+
+    let records = output.split_terminator('\0').collect::<Vec<_>>();
+    let mut index = 0;
+
+    while index < records.len() {
+        let record = records[index];
+
+        if let Some(value) = record.strip_prefix("# branch.head ") {
+            branch = (value != "(detached)").then(|| value.to_owned());
+            index += 1;
+            continue;
+        }
+
+        if let Some(value) = record.strip_prefix("# branch.upstream ") {
+            upstream = Some(value.to_owned());
+            index += 1;
+            continue;
+        }
+
+        if let Some(value) = record.strip_prefix("# branch.ab ") {
+            let (next_ahead, next_behind) = parse_ahead_behind(value)?;
+            ahead = next_ahead;
+            behind = next_behind;
+            index += 1;
+            continue;
+        }
+
+        if let Some(file) = parse_file_record(record)? {
+            files.push(file);
+        }
+
+        index += if record.starts_with("2 ") { 2 } else { 1 };
     }
 
-    parse_status_output(&String::from_utf8_lossy(&output.stdout))
+    Ok(RepositoryStatus {
+        branch,
+        upstream,
+        ahead,
+        behind,
+        files,
+    })
 }
 
 fn parse_ahead_behind(value: &str) -> Result<(u32, u32), OperationError> {
@@ -147,19 +187,42 @@ fn parse_file_line(line: &str) -> Result<Option<StatusFile>, OperationError> {
         }));
     }
 
-    if !line.starts_with("1 ") {
+    parse_file_record(line)
+}
+
+fn parse_file_record(record: &str) -> Result<Option<StatusFile>, OperationError> {
+    let Some(record_kind) = record.chars().next() else {
         return Ok(None);
+    };
+
+    if record_kind == '?' {
+        let Some(path) = record.strip_prefix("? ") else {
+            return Err(OperationError::parse("missing untracked file path"));
+        };
+        return Ok(Some(StatusFile {
+            path: path.to_owned(),
+            index_status: GitFileStatus::Untracked,
+            worktree_status: GitFileStatus::Untracked,
+        }));
     }
 
-    let mut parts = line.split_whitespace();
-    let _record_type = parts.next();
-    let Some(status_pair) = parts.next() else {
-        return Err(OperationError::parse("missing porcelain status pair"));
-    };
-    let Some(path) = parts.nth(6) else {
-        return Err(OperationError::parse("missing porcelain file path"));
-    };
+    if record_kind == '!' {
+        let Some(path) = record.strip_prefix("! ") else {
+            return Err(OperationError::parse("missing ignored file path"));
+        };
+        return Ok(Some(StatusFile {
+            path: path.to_owned(),
+            index_status: GitFileStatus::Ignored,
+            worktree_status: GitFileStatus::Ignored,
+        }));
+    }
 
+    let (status_pair, path) = match record_kind {
+        '1' => parse_status_record_parts(record, 9)?,
+        '2' => parse_status_record_parts(record, 10)?,
+        'u' => parse_status_record_parts(record, 11)?,
+        _ => return Ok(None),
+    };
     let mut chars = status_pair.chars();
     let index_status = chars.next().map_or(GitFileStatus::Unknown, map_status);
     let worktree_status = chars.next().map_or(GitFileStatus::Unknown, map_status);
@@ -169,6 +232,23 @@ fn parse_file_line(line: &str) -> Result<Option<StatusFile>, OperationError> {
         index_status,
         worktree_status,
     }))
+}
+
+fn parse_status_record_parts(
+    record: &str,
+    expected_parts: usize,
+) -> Result<(&str, &str), OperationError> {
+    let parts = record.splitn(expected_parts, ' ').collect::<Vec<_>>();
+
+    let Some(status_pair) = parts.get(1) else {
+        return Err(OperationError::parse("missing porcelain status pair"));
+    };
+
+    let Some(path) = parts.get(expected_parts - 1) else {
+        return Err(OperationError::parse("missing porcelain file path"));
+    };
+
+    Ok((status_pair, path))
 }
 
 const fn map_status(value: char) -> GitFileStatus {
@@ -225,6 +305,55 @@ mod tests {
                     },
                     StatusFile {
                         path: "scratch.txt".to_owned(),
+                        index_status: GitFileStatus::Untracked,
+                        worktree_status: GitFileStatus::Untracked,
+                    },
+                ],
+            }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_z_records_with_spaces_renames_and_conflicts() -> Result<(), OperationError> {
+        let output = "\
+# branch.oid 1111111111111111111111111111111111111111\0\
+# branch.head feature/workbench\0\
+# branch.upstream origin/feature/workbench\0\
+# branch.ab +0 -3\0\
+1 .M N... 100644 100644 100644 1111111111111111111111111111111111111111 1111111111111111111111111111111111111111 docs/file with spaces.md\0\
+2 R. N... 100644 100644 100644 1111111111111111111111111111111111111111 2222222222222222222222222222222222222222 R100 src/new name.ts\0src/old name.ts\0\
+u UU N... 100644 100644 100644 100644 1111111111111111111111111111111111111111 2222222222222222222222222222222222222222 3333333333333333333333333333333333333333 src/conflict.ts\0\
+? scratch file.txt\0";
+
+        let status = parse_status_output(output)?;
+
+        assert_eq!(
+            status,
+            RepositoryStatus {
+                branch: Some("feature/workbench".to_owned()),
+                upstream: Some("origin/feature/workbench".to_owned()),
+                ahead: 0,
+                behind: 3,
+                files: vec![
+                    StatusFile {
+                        path: "docs/file with spaces.md".to_owned(),
+                        index_status: GitFileStatus::Unmodified,
+                        worktree_status: GitFileStatus::Modified,
+                    },
+                    StatusFile {
+                        path: "src/new name.ts".to_owned(),
+                        index_status: GitFileStatus::Renamed,
+                        worktree_status: GitFileStatus::Unmodified,
+                    },
+                    StatusFile {
+                        path: "src/conflict.ts".to_owned(),
+                        index_status: GitFileStatus::Unmerged,
+                        worktree_status: GitFileStatus::Unmerged,
+                    },
+                    StatusFile {
+                        path: "scratch file.txt".to_owned(),
                         index_status: GitFileStatus::Untracked,
                         worktree_status: GitFileStatus::Untracked,
                     },
