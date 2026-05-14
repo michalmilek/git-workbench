@@ -15,7 +15,7 @@ The first implementation includes:
 
 - Tauri app scaffold using React frontend and Bun package management.
 - shadcn-based frontend setup applied with `bunx --bun shadcn@latest apply --preset b6GMNXFsB` after the Tauri/React scaffold exists. The preset is the source of truth for the component base, visual tokens, and generated component conventions.
-- Very strict frontend quality gates: Oxlint, TypeScript `strict`, typecheck-only CI command, and formatting checks.
+- Very strict frontend quality gates: Oxlint, TypeScript `strict`, typecheck-only CI command, and formatting checks. Frontend non-null assertions are forbidden through `typescript/no-non-null-assertion` and related non-null assertion rules.
 - Very strict Rust quality gates: rustfmt, Clippy with warnings denied, Clippy `all`, `pedantic`, and `nursery` groups, plus explicit denies for common footguns such as `unwrap`, `expect`, `panic`, `todo`, `unimplemented`, debug macros, stdout/stderr prints, and unsafe code.
 - Local repository opening and recent repository list.
 - Repository status, changed file list, file diff, stage/unstage, and hunk-level staging for text diffs through patch application. Binary files and unsupported diff shapes fall back to file-level staging.
@@ -64,6 +64,7 @@ Frontend tooling:
 - If the preset resolves to Base UI, use Base UI composition rules for custom triggers and component extension instead of Radix-specific APIs.
 - Prefer copied-in shadcn-style components over ad hoc UI markup.
 - Run Oxlint as a blocking frontend lint gate with warnings treated as failures.
+- Configure Oxlint with `typescript/no-non-null-assertion`, `typescript/no-extra-non-null-assertion`, `typescript/no-non-null-asserted-optional-chain`, and `typescript/no-non-null-asserted-nullish-coalescing` as errors, so postfix non-null assertions such as `value!` and `ref.current!` are not allowed in frontend TypeScript or TSX.
 - Run TypeScript with `noEmit` as a separate blocking typecheck.
 
 Rust tooling:
@@ -160,6 +161,7 @@ Frontend tests cover:
 - Commit form validation.
 - Provider account form validation.
 - Oxlint with warnings failing the command.
+- Oxlint rejection of frontend non-null assertions.
 - TypeScript `noEmit` typechecking.
 
 Smoke and manual verification cover:

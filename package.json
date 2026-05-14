@@ -6,11 +6,13 @@
   "scripts": {
     "prepare": "husky",
     "commitlint": "commitlint",
-    "commitlint:last": "commitlint --from HEAD~1 --to HEAD --verbose"
+    "commitlint:last": "commitlint --from HEAD~1 --to HEAD --verbose",
+    "lint:front": "oxlint --deny-warnings --react-plugin --jsx-a11y-plugin --react-perf-plugin --no-error-on-unmatched-pattern src"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.0.1",
     "@commitlint/config-conventional": "^21.0.1",
-    "husky": "^9.1.7"
+    "husky": "^9.1.7",
+    "oxlint": "^1.64.0"
   }
 }
