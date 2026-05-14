@@ -1,7 +1,8 @@
 # Git Workbench Roadmap
 
 Date: 2026-05-14
-Status: Draft
+Status: Active
+Last updated: 2026-05-14
 
 ## Product Direction
 
@@ -18,27 +19,52 @@ The repository already includes:
 - Strict frontend checks through TypeScript, Oxlint, and Vitest.
 - Strict Rust checks through rustfmt, Clippy, and crate-level deny rules.
 - Conventional commit enforcement through Husky and Commitlint.
-- Initial Git status parser for `git status --porcelain=v2 --branch`.
-- Initial three-column workbench shell.
+- GitHub repository with `main` protected by a ruleset requiring pull requests.
+- Real Git status parsing through `git status --porcelain=v2 -z --branch`.
+- Initial three-column workbench shell wired to local Git operations.
+- Browser fallback client for Vite smoke testing outside the Tauri runtime.
+
+## Completed So Far
+
+These items are already implemented on `main`:
+
+- Project scaffold: Tauri 2, React, Bun, Vite, TypeScript, and shadcn preset.
+- Quality gates: strict frontend checks, strict Rust checks, conventional commits, and Husky hooks.
+- Repository opening through a path input.
+- Recent repositories stored through localStorage helpers.
+- Real repository status loading through Tauri commands.
+- Changed file list for tracked, untracked, renamed, copied, unmerged, and ignored files.
+- Status parser support for porcelain v2 `-z` records, including paths with spaces.
+- File diff loading for staged and worktree changes.
+- Untracked text file preview rendered as a synthetic diff.
+- Binary diff marker detection.
+- File-level stage and unstage operations.
+- Commit composer with summary, optional body, amend toggle, and staged-change validation.
+- Commit creation through the system `git`.
+- Fetch, pull, and push commands through the system `git`.
+- Latest operation result/error display with command, stdout, and stderr.
+- Frontend tests for repository summaries, recents, commit validation, and Tauri invoke payloads.
+- Rust tests for status parsing, command argument construction, untracked diff rendering, and a real temporary Git repository flow.
 
 ## P0: Usable Local Git Core
 
 Goal: turn the current shell into the first useful desktop Git client.
 
-- Open a local repository from the filesystem.
-- Store and display recent repositories.
-- Replace mocked workbench data with real repository status from Tauri.
-- Show changed files grouped by status.
-- Display text diffs for selected files.
-- Stage and unstage complete files.
-- Stage and unstage individual hunks for supported text diffs.
-- Fall back to file-level staging for binary files and unsupported diff shapes.
-- Add a commit composer with summary, body, amend toggle, and validation.
-- Create commits through the system `git`.
-- Fetch, pull, and push through the system `git`.
-- Show operation progress, final result, and command output for each Git action.
+- Done: open a local repository by path.
+- Done: store and display recent repositories.
+- Done: replace mocked workbench data with real repository status from Tauri.
+- Done: show changed files grouped by status.
+- Done: display text diffs for selected files.
+- Done: stage and unstage complete files.
+- Not done: stage and unstage individual hunks for supported text diffs.
+- Done: fall back to file-level staging for binary files and unsupported diff shapes.
+- Done: add a commit composer with summary, body, amend toggle, and validation.
+- Done: create commits through the system `git`.
+- Done: fetch, pull, and push through the system `git`.
+- Done: show operation result/error details and command output for each Git action.
+- Not done: live progress logs for long-running Git operations.
 
-Recommended next milestone: implement repository open, real status, diff viewer, file staging, commit creation, and push.
+Recommended next milestone: add branch list, checkout, branch creation, stash basics, and a persistent command log.
 
 ## P1: Daily Branch Workflows
 
@@ -125,16 +151,17 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 
 ## Suggested Milestone Order
 
-1. Repository open and recent repositories.
-2. Real status and changed file list.
-3. Diff viewer.
-4. File-level staging and unstaging.
-5. Commit composer and commit creation.
-6. Fetch, pull, and push.
-7. Branch list, checkout, and branch creation.
-8. Stash workflow.
-9. Commit history and branch graph.
-10. Provider detection and account setup.
-11. PR/MR list and CI status.
-12. Merge and rebase preview.
-13. Conflict display and recovery.
+1. Done: repository open and recent repositories.
+2. Done: real status and changed file list.
+3. Done: diff viewer.
+4. Done: file-level staging and unstaging.
+5. Done: commit composer and commit creation.
+6. Done: fetch, pull, and push.
+7. Next: branch list, checkout, and branch creation.
+8. Next: stash workflow.
+9. Next: persistent command log.
+10. Later: commit history and branch graph.
+11. Later: provider detection and account setup.
+12. Later: PR/MR list and CI status.
+13. Later: merge and rebase preview.
+14. Later: conflict display and recovery.
