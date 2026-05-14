@@ -14,6 +14,9 @@ The first product direction is a workbench-centered app. The primary screen supp
 The first implementation includes:
 
 - Tauri app scaffold using React frontend and Bun package management.
+- shadcn-based frontend setup applied with `bunx --bun shadcn@latest apply --preset b6GMNXFsB` after the Tauri/React scaffold exists. The preset is the source of truth for the component base, visual tokens, and generated component conventions.
+- Very strict frontend quality gates: Oxlint, TypeScript `strict`, typecheck-only CI command, and formatting checks.
+- Very strict Rust quality gates: rustfmt, Clippy with warnings denied, Clippy `all`, `pedantic`, and `nursery` groups, plus explicit denies for common footguns such as `unwrap`, `expect`, `panic`, `todo`, `unimplemented`, debug macros, stdout/stderr prints, and unsafe code.
 - Local repository opening and recent repository list.
 - Repository status, changed file list, file diff, stage/unstage, and hunk-level staging for text diffs through patch application. Binary files and unsupported diff shapes fall back to file-level staging.
 - Commit creation, including commit message validation and optional amend toggle.
@@ -44,6 +47,32 @@ The backend is split into three modules:
 The app uses the system `git` as the source of truth. SSH agent, credential helper, hooks, VPN-specific behavior, and self-hosted GitLab transport follow the user's existing terminal setup. Provider tokens are used for API requests only, not for Git transport, unless the user has already configured Git that way outside the app.
 
 The frontend does not parse raw Git terminal text. Tauri commands return structured models such as `RepositoryStatus`, `CommitGraph`, `DiffFile`, `OperationPreview`, `ProviderAccount`, and `MergeRequestSummary`.
+
+## Tooling And UI Foundation
+
+Frontend tooling:
+
+- Use Bun as the package manager and script runner.
+- Use React with TypeScript in strict mode.
+- Apply the provided shadcn preset after the app scaffold:
+
+  ```bash
+  bunx --bun shadcn@latest apply --preset b6GMNXFsB
+  ```
+
+- Treat the resulting `components.json` as authoritative for aliases, icon library, component paths, Tailwind setup, and whether the generated component base is Base UI or another primitive layer.
+- If the preset resolves to Base UI, use Base UI composition rules for custom triggers and component extension instead of Radix-specific APIs.
+- Prefer copied-in shadcn-style components over ad hoc UI markup.
+- Run Oxlint as a blocking frontend lint gate with warnings treated as failures.
+- Run TypeScript with `noEmit` as a separate blocking typecheck.
+
+Rust tooling:
+
+- Run rustfmt as a blocking format check.
+- Run Clippy across all targets and features with warnings denied.
+- Enable strict Clippy coverage through `clippy::all`, `clippy::pedantic`, and `clippy::nursery`.
+- Add crate-level denies for `unsafe_code`, `clippy::unwrap_used`, `clippy::expect_used`, `clippy::panic`, `clippy::todo`, `clippy::unimplemented`, `clippy::dbg_macro`, `clippy::print_stdout`, and `clippy::print_stderr`.
+- Do not enable the entire `clippy::restriction` group. It contains intentionally opinionated and sometimes conflicting lints; use explicit restriction lints only when they protect this app's quality bar.
 
 ## UI Model
 
@@ -130,6 +159,8 @@ Frontend tests cover:
 - Mapping Tauri responses into UI models.
 - Commit form validation.
 - Provider account form validation.
+- Oxlint with warnings failing the command.
+- TypeScript `noEmit` typechecking.
 
 Smoke and manual verification cover:
 
@@ -142,6 +173,9 @@ Smoke and manual verification cover:
 
 - Use system Git instead of libgit2 for the first implementation.
 - Use a Workbench-first layout instead of making graph or mode navigation the whole app center.
+- Use the user-provided shadcn preset command for frontend component setup.
+- Keep shadcn/Base UI details driven by generated `components.json` instead of hardcoding assumptions before the preset is applied.
+- Keep Oxlint and Rust Clippy strict from the first scaffold so code quality does not become a retrofit.
 - Execute checkout, branch operations, stash, fetch, pull, and push in the first version.
 - Keep merge and rebase preview-only until the operation model, conflict display, and recovery flow are proven.
 - Support provider APIs early, but limit the first provider feature set to account setup, connection tests, PR/MR lists, and CI/pipeline status.
