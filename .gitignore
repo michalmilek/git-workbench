@@ -1,3 +1,7 @@
 .superpowers/
 .worktrees/
 node_modules/
+.tmp-tauri-scaffold/
+dist/
+src-tauri/target/
+src-tauri/gen/
