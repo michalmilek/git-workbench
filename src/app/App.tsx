@@ -15,7 +15,7 @@ import {
   IconTrash,
   IconUpload
 } from "@tabler/icons-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,11 +36,13 @@ import {
   createBranch,
   createStash,
   deleteBranch,
+  deleteProviderAccount,
   dropStash,
   fetchRepository,
   getCommitDetails,
   getFileDiff,
   getRepositoryStatus,
+  listProviderAccounts,
   listBranches,
   listCommitHistory,
   listProviderRemotes,
@@ -48,7 +50,9 @@ import {
   popStash,
   pullRepository,
   pushRepository,
+  saveProviderAccount,
   stageFile,
+  testProviderConnection,
   unstageFile
 } from "@/features/repository/repository-client";
 import {
@@ -72,6 +76,9 @@ import type {
   DiffMode,
   FileDiff,
   GitOperationResult,
+  ProviderAccount,
+  ProviderAccountKind,
+  ProviderConnectionResult,
   ProviderKind,
   ProviderRemote,
   RepositoryStatus,
@@ -103,6 +110,7 @@ type OperationFeedback =
 type SyncAction = "fetch" | "pull" | "push";
 type BranchAction = "checkout-branch" | "create-branch" | "delete-branch";
 type StashAction = "create-stash" | "apply-stash" | "pop-stash" | "drop-stash";
+type ProviderAccountAction = "save-account" | "delete-account" | "test-account" | null;
 type BusyAction =
   | "status"
   | "diff"
@@ -114,6 +122,21 @@ type BusyAction =
   | StashAction
   | null;
 
+const providerKindLabels: Record<ProviderKind, string> = {
+  customGitlab: "Custom GitLab",
+  github: "GitHub",
+  gitlab: "GitLab",
+  unknown: "Unknown"
+};
+
+const providerAccountKinds: ProviderAccountKind[] = ["github", "gitlab", "customGitlab"];
+
+const defaultProviderBaseUrls: Record<ProviderAccountKind, string> = {
+  customGitlab: "",
+  github: "https://github.com",
+  gitlab: "https://gitlab.com"
+};
+
 export function App() {
   const [recentRepositories, setRecentRepositories] = useState(readRecentRepositories);
   const [repositoryPathInput, setRepositoryPathInput] = useState(readInitialRepositoryPath);
@@ -122,6 +145,15 @@ export function App() {
   const [status, setStatus] = useState<RepositoryStatus | null>(null);
   const [providerRemotes, setProviderRemotes] = useState<ProviderRemote[]>([]);
   const [providerLoading, setProviderLoading] = useState(false);
+  const [providerAccounts, setProviderAccounts] = useState<ProviderAccount[]>([]);
+  const [providerAccountsLoading, setProviderAccountsLoading] = useState(false);
+  const [providerAccountKind, setProviderAccountKind] = useState<ProviderAccountKind>("github");
+  const [providerAccountBaseUrl, setProviderAccountBaseUrl] = useState(defaultProviderBaseUrls.github);
+  const [providerAccountLabel, setProviderAccountLabel] = useState("");
+  const [providerAccountToken, setProviderAccountToken] = useState("");
+  const [providerAccountAction, setProviderAccountAction] = useState<ProviderAccountAction>(null);
+  const [activeProviderAccountId, setActiveProviderAccountId] = useState<string | null>(null);
+  const [providerConnectionResults, setProviderConnectionResults] = useState<Record<string, ProviderConnectionResult>>({});
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [diffMode, setDiffMode] = useState<DiffMode>("worktree");
   const [diff, setDiff] = useState<FileDiff | null>(null);
@@ -146,6 +178,7 @@ export function App() {
   const diffRequestId = useRef(0);
   const referenceRequestId = useRef(0);
   const providerRequestId = useRef(0);
+  const providerAccountsRequestId = useRef(0);
   const historyRequestId = useRef(0);
   const commitDetailsRequestId = useRef(0);
   const commandLogId = useRef(0);
@@ -166,6 +199,35 @@ export function App() {
   const canCreateBranch = repositoryPath !== null && branchNameInput.trim().length > 0 && busyAction === null;
   const canCreateStash = repositoryPath !== null && busyAction === null;
   const canRunSelectedStashOperation = repositoryPath !== null && selectedStash !== null && busyAction === null;
+  const canSaveProviderAccount =
+    providerAccountAction === null &&
+    providerAccountBaseUrl.trim().length > 0 &&
+    providerAccountLabel.trim().length > 0 &&
+    providerAccountToken.trim().length > 0;
+
+  useEffect(() => {
+    const requestId = providerAccountsRequestId.current + 1;
+    providerAccountsRequestId.current = requestId;
+    setProviderAccountsLoading(true);
+
+    void listProviderAccounts()
+      .then((accounts) => {
+        if (providerAccountsRequestId.current === requestId) {
+          setProviderAccounts(accounts);
+        }
+      })
+      .catch((error: unknown) => {
+        if (providerAccountsRequestId.current === requestId) {
+          setFeedback({ kind: "error", error: describeOperationError(error) });
+          setProviderAccounts([]);
+        }
+      })
+      .finally(() => {
+        if (providerAccountsRequestId.current === requestId) {
+          setProviderAccountsLoading(false);
+        }
+      });
+  }, []);
 
   async function openRepository() {
     const path = repositoryPathInput.trim();
@@ -638,6 +700,79 @@ export function App() {
     }
   }
 
+  function selectProviderAccountKind(providerKind: ProviderAccountKind) {
+    setProviderAccountKind(providerKind);
+    setProviderAccountBaseUrl(defaultProviderBaseUrls[providerKind]);
+  }
+
+  async function saveCurrentProviderAccount() {
+    const input = {
+      baseUrl: providerAccountBaseUrl.trim(),
+      label: providerAccountLabel.trim(),
+      providerKind: providerAccountKind,
+      token: providerAccountToken
+    };
+
+    if (input.baseUrl.length === 0 || input.label.length === 0 || input.token.trim().length === 0) {
+      return;
+    }
+
+    setProviderAccountAction("save-account");
+    setActiveProviderAccountId(null);
+
+    try {
+      const account = await saveProviderAccount(input);
+      setProviderAccounts((accounts) => upsertProviderAccount(accounts, account));
+      setProviderConnectionResults((results) => removeProviderConnectionResult(results, account.id));
+      setProviderAccountToken("");
+      recordProviderAccountSaveResult(account);
+    } catch (error) {
+      const operationError = describeOperationError(error);
+      setFeedback({ kind: "error", error: operationError });
+      recordOperationError("Save provider account", operationError);
+    } finally {
+      setProviderAccountAction(null);
+    }
+  }
+
+  async function deleteSavedProviderAccount(account: ProviderAccount) {
+    setProviderAccountAction("delete-account");
+    setActiveProviderAccountId(account.id);
+
+    try {
+      const result = await deleteProviderAccount(account.id);
+      setProviderAccounts((accounts) => accounts.filter((providerAccount) => providerAccount.id !== account.id));
+      setProviderConnectionResults((results) => removeProviderConnectionResult(results, account.id));
+      setFeedback({ kind: "result", result });
+      recordOperationResult("Delete provider account", result);
+    } catch (error) {
+      const operationError = describeOperationError(error);
+      setFeedback({ kind: "error", error: operationError });
+      recordOperationError("Delete provider account", operationError);
+    } finally {
+      setProviderAccountAction(null);
+      setActiveProviderAccountId(null);
+    }
+  }
+
+  async function testSavedProviderAccount(account: ProviderAccount) {
+    setProviderAccountAction("test-account");
+    setActiveProviderAccountId(account.id);
+
+    try {
+      const result = await testProviderConnection(account.id);
+      setProviderConnectionResults((results) => ({ ...results, [result.accountId]: result }));
+      recordProviderConnectionResult(result);
+    } catch (error) {
+      const operationError = describeOperationError(error);
+      setFeedback({ kind: "error", error: operationError });
+      recordOperationError("Test provider connection", operationError);
+    } finally {
+      setProviderAccountAction(null);
+      setActiveProviderAccountId(null);
+    }
+  }
+
   function rememberRepository(path: string) {
     const nextRepositories = updateRecentRepositories(recentRepositories, path);
     setRecentRepositories(nextRepositories);
@@ -666,6 +801,30 @@ export function App() {
       status: "error",
       stderr: error.stderr,
       stdout: error.stdout,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  function recordProviderAccountSaveResult(account: ProviderAccount) {
+    saveCommandLogEntry({
+      command: `save_provider_account ${account.id}`,
+      id: createCommandLogId(),
+      message: `Saved ${account.label}.`,
+      operation: "Save provider account",
+      status: "success",
+      stdout: `${providerKindLabels[account.providerKind]} ${account.baseUrl}\nToken configured: ${formatBoolean(account.tokenConfigured)}`,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  function recordProviderConnectionResult(result: ProviderConnectionResult) {
+    saveCommandLogEntry({
+      command: `test_provider_connection ${result.accountId}`,
+      id: createCommandLogId(),
+      message: result.message,
+      operation: "Test provider connection",
+      status: result.ok ? "success" : "error",
+      stdout: `HTTP status: ${formatProviderStatusCode(result.statusCode)}\n${result.message}`,
       timestamp: new Date().toISOString()
     });
   }
@@ -1348,6 +1507,26 @@ export function App() {
 
           <ProviderRemotesPanel loading={providerLoading} remotes={providerRemotes} repositoryOpened={repositoryPath !== null} />
 
+          <ProviderAccountsPanel
+            accounts={providerAccounts}
+            action={providerAccountAction}
+            activeAccountId={activeProviderAccountId}
+            baseUrl={providerAccountBaseUrl}
+            canSave={canSaveProviderAccount}
+            connectionResults={providerConnectionResults}
+            label={providerAccountLabel}
+            loading={providerAccountsLoading}
+            onBaseUrlChange={setProviderAccountBaseUrl}
+            onDelete={(account) => void deleteSavedProviderAccount(account)}
+            onLabelChange={setProviderAccountLabel}
+            onProviderKindChange={selectProviderAccountKind}
+            onSave={() => void saveCurrentProviderAccount()}
+            onTest={(account) => void testSavedProviderAccount(account)}
+            onTokenChange={setProviderAccountToken}
+            providerKind={providerAccountKind}
+            token={providerAccountToken}
+          />
+
           <div className="mt-4 flex flex-col gap-3 rounded-md border bg-background p-3 text-sm">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 font-medium">
@@ -1659,6 +1838,241 @@ function ProviderRemotesPanel({
   );
 }
 
+function ProviderAccountsPanel({
+  accounts,
+  action,
+  activeAccountId,
+  baseUrl,
+  canSave,
+  connectionResults,
+  label,
+  loading,
+  onBaseUrlChange,
+  onDelete,
+  onLabelChange,
+  onProviderKindChange,
+  onSave,
+  onTest,
+  onTokenChange,
+  providerKind,
+  token
+}: {
+  accounts: ProviderAccount[];
+  action: ProviderAccountAction;
+  activeAccountId: string | null;
+  baseUrl: string;
+  canSave: boolean;
+  connectionResults: Record<string, ProviderConnectionResult>;
+  label: string;
+  loading: boolean;
+  onBaseUrlChange(value: string): void;
+  onDelete(account: ProviderAccount): void;
+  onLabelChange(value: string): void;
+  onProviderKindChange(providerKind: ProviderAccountKind): void;
+  onSave(): void;
+  onTest(account: ProviderAccount): void;
+  onTokenChange(value: string): void;
+  providerKind: ProviderAccountKind;
+  token: string;
+}) {
+  return (
+    <div className="mt-4 flex flex-col gap-3 rounded-md border bg-background p-3 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 font-medium">
+          <IconServer aria-hidden="true" className="size-4 shrink-0" />
+          Accounts
+        </div>
+        <Badge variant={loading ? "outline" : "secondary"}>{loading ? "Loading" : accounts.length}</Badge>
+      </div>
+
+      <form
+        className="flex flex-col gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave();
+        }}
+      >
+        <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground" htmlFor="provider-account-kind">
+          Provider
+          <select
+            className="h-8 rounded-md border border-input bg-background px-2 text-sm font-normal text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+            disabled={action !== null}
+            id="provider-account-kind"
+            onChange={(event) => {
+              onProviderKindChange(event.target.value as ProviderAccountKind);
+            }}
+            value={providerKind}
+          >
+            {providerAccountKinds.map((kind) => (
+              <option key={kind} value={kind}>
+                {providerKindLabels[kind]}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground" htmlFor="provider-account-base-url">
+          Base URL
+          <input
+            className="h-8 rounded-md border border-input bg-background px-2 text-sm font-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+            disabled={action !== null}
+            id="provider-account-base-url"
+            onChange={(event) => {
+              onBaseUrlChange(event.target.value);
+            }}
+            placeholder="https://gitlab.company.test"
+            value={baseUrl}
+          />
+        </label>
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-muted-foreground" htmlFor="provider-account-label">
+            Label
+            <input
+              className="h-8 min-w-0 rounded-md border border-input bg-background px-2 text-sm font-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+              disabled={action !== null}
+              id="provider-account-label"
+              onChange={(event) => {
+                onLabelChange(event.target.value);
+              }}
+              placeholder="Work"
+              value={label}
+            />
+          </label>
+
+          <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-muted-foreground" htmlFor="provider-account-token">
+            Token
+            <input
+              autoComplete="off"
+              className="h-8 min-w-0 rounded-md border border-input bg-background px-2 text-sm font-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+              disabled={action !== null}
+              id="provider-account-token"
+              onChange={(event) => {
+                onTokenChange(event.target.value);
+              }}
+              placeholder="Access token"
+              type="password"
+              value={token}
+            />
+          </label>
+        </div>
+
+        <Button disabled={!canSave} size="sm" type="submit" variant="secondary">
+          <IconPlus aria-hidden="true" data-icon="inline-start" />
+          {action === "save-account" ? "Saving" : "Save"}
+        </Button>
+      </form>
+
+      <div className="flex max-h-64 flex-col gap-2 overflow-auto">
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading accounts</p>
+        ) : accounts.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No accounts configured.</p>
+        ) : (
+          accounts.map((account) => (
+            <ProviderAccountCard
+              account={account}
+              action={action}
+              activeAccountId={activeAccountId}
+              connectionResult={connectionResults[account.id]}
+              key={account.id}
+              onDelete={onDelete}
+              onTest={onTest}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProviderAccountCard({
+  account,
+  action,
+  activeAccountId,
+  connectionResult,
+  onDelete,
+  onTest
+}: {
+  account: ProviderAccount;
+  action: ProviderAccountAction;
+  activeAccountId: string | null;
+  connectionResult: ProviderConnectionResult | undefined;
+  onDelete(account: ProviderAccount): void;
+  onTest(account: ProviderAccount): void;
+}) {
+  const accountActionIsActive = activeAccountId === account.id;
+
+  return (
+    <div className="rounded-md border p-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate font-medium">{account.label}</p>
+          <p className="truncate text-xs text-muted-foreground">{account.baseUrl}</p>
+        </div>
+        <Badge className="shrink-0" variant="secondary">
+          {providerKindLabels[account.providerKind]}
+        </Badge>
+      </div>
+
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <Badge variant={account.tokenConfigured ? "secondary" : "outline"}>
+          Token: {formatBoolean(account.tokenConfigured)}
+        </Badge>
+        <ProviderConnectionBadge result={connectionResult} />
+      </div>
+
+      <ProviderConnectionSummary result={connectionResult} />
+
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <Button
+          disabled={action !== null}
+          onClick={() => {
+            onTest(account);
+          }}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          {action === "test-account" && accountActionIsActive ? "Testing" : "Test"}
+        </Button>
+        <Button
+          disabled={action !== null}
+          onClick={() => {
+            onDelete(account);
+          }}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <IconTrash aria-hidden="true" data-icon="inline-start" />
+          {action === "delete-account" && accountActionIsActive ? "Deleting" : "Delete"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ProviderConnectionBadge({ result }: { result: ProviderConnectionResult | undefined }) {
+  if (result === undefined) {
+    return <Badge variant="outline">Not tested</Badge>;
+  }
+
+  return <Badge variant={result.ok ? "secondary" : "destructive"}>{result.ok ? "OK" : "Failed"}</Badge>;
+}
+
+function ProviderConnectionSummary({ result }: { result: ProviderConnectionResult | undefined }) {
+  if (result === undefined) {
+    return <p className="mt-2 text-xs text-muted-foreground">Last test: not run.</p>;
+  }
+
+  return (
+    <p className="mt-2 text-xs text-muted-foreground">
+      {formatProviderStatusCode(result.statusCode)} - {result.message}
+    </p>
+  );
+}
+
 function ProviderRemoteCard({ remote }: { remote: ProviderRemote }) {
   return (
     <div className="rounded-md border p-2">
@@ -1694,13 +2108,6 @@ function ProviderUrlAvailability({ label, url }: { label: string; url: string | 
   );
 }
 
-const providerKindLabels: Record<ProviderKind, string> = {
-  customGitlab: "Custom GitLab",
-  github: "GitHub",
-  gitlab: "GitLab",
-  unknown: "Unknown"
-};
-
 function formatProviderValue(value: string | null): string {
   return value ?? "unknown";
 }
@@ -1711,6 +2118,31 @@ function formatProviderOwnerRepository(remote: ProviderRemote): string {
   }
 
   return `${formatProviderValue(remote.owner)}/${formatProviderValue(remote.repository)}`;
+}
+
+function upsertProviderAccount(accounts: ProviderAccount[], account: ProviderAccount): ProviderAccount[] {
+  if (accounts.some((providerAccount) => providerAccount.id === account.id)) {
+    return accounts.map((providerAccount) => (providerAccount.id === account.id ? account : providerAccount));
+  }
+
+  return [account, ...accounts];
+}
+
+function removeProviderConnectionResult(
+  results: Record<string, ProviderConnectionResult>,
+  accountId: string
+): Record<string, ProviderConnectionResult> {
+  const nextResults = { ...results };
+  delete nextResults[accountId];
+  return nextResults;
+}
+
+function formatBoolean(value: boolean): string {
+  return value ? "yes" : "no";
+}
+
+function formatProviderStatusCode(statusCode: number | null): string {
+  return statusCode === null ? "No HTTP status" : `HTTP ${statusCode}`;
 }
 
 function CommitGraphRail({ commit, index, total }: { commit: CommitSummary; index: number; total: number }) {

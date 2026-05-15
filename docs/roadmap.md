@@ -27,6 +27,9 @@ The repository already includes:
 - Repository history, compact branch graph rail, commit details, changed files, and patch text.
 - History filtering across subject, author, oid, and refs.
 - Provider remote detection for GitHub, GitLab.com, and self-hosted GitLab-style hosts.
+- Provider account configuration with non-secret metadata in app config.
+- Provider token storage in the OS keychain.
+- Provider API connection testing for configured accounts.
 - Persistent command log stored in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
 
@@ -56,6 +59,9 @@ These items are already implemented on `main`:
 - Commit details with body, changed files, and patch text.
 - History filtering by subject, author, oid, and refs.
 - Provider remote detection for GitHub, GitLab.com, and self-hosted GitLab-style hosts.
+- Provider account configuration with non-secret metadata in app config.
+- Provider token storage in the OS keychain.
+- Provider API connection testing for configured accounts.
 - Latest operation result/error display with command, stdout, and stderr.
 - Persistent command log stored in localStorage.
 - Frontend tests for repository summaries, recents, commit validation, and Tauri invoke payloads.
@@ -104,10 +110,10 @@ Goal: make GitHub, GitLab.com, and company GitLab instances first-class without 
 - Done: support GitHub remotes.
 - Done: support GitLab.com remotes.
 - Done: support custom GitLab base URLs for self-hosted instances.
-- Add provider account configuration.
-- Store provider tokens in the OS keychain.
-- Keep non-secret provider metadata in local app config.
-- Test provider API connections.
+- Done: add provider account configuration.
+- Done: store provider tokens in the OS keychain.
+- Done: keep non-secret provider metadata in local app config.
+- Done: test provider API connections.
 - Show PR/MR lists for the active repository.
 - Show CI/check/pipeline status.
 - Open PR/MR and pipeline links externally.
@@ -176,7 +182,7 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 8. Done: stash workflow.
 9. Done: persistent command log.
 10. Done: commit history and branch graph.
-11. In progress: provider detection and account setup.
+11. Done: provider detection and account setup.
 12. Next: PR/MR list and CI status.
 13. Later: merge and rebase preview.
 14. Later: conflict display and recovery.

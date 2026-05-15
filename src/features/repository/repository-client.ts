@@ -6,6 +6,9 @@ import type {
   CommitSummary,
   FileDiff,
   GitOperationResult,
+  ProviderAccount,
+  ProviderAccountInput,
+  ProviderConnectionResult,
   ProviderRemoteList,
   RepositoryStatus,
   StashEntry
@@ -55,6 +58,10 @@ type InvokeCommand = <T>(command: string, args: Record<string, unknown>) => Prom
 export type RepositoryClient = {
   getRepositoryStatus(repositoryPath: string): Promise<RepositoryStatus>;
   listProviderRemotes(repositoryPath: string): Promise<ProviderRemoteList>;
+  listProviderAccounts(): Promise<ProviderAccount[]>;
+  saveProviderAccount(input: ProviderAccountInput): Promise<ProviderAccount>;
+  deleteProviderAccount(accountId: string): Promise<GitOperationResult>;
+  testProviderConnection(accountId: string): Promise<ProviderConnectionResult>;
   getFileDiff(args: FileDiffArgs): Promise<FileDiff>;
   stageFile(args: FileOperationArgs): Promise<GitOperationResult>;
   unstageFile(args: FileOperationArgs): Promise<GitOperationResult>;
@@ -112,6 +119,18 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
     },
     listProviderRemotes(repositoryPath) {
       return invokeCommand<ProviderRemoteList>("list_provider_remotes", { repositoryPath });
+    },
+    listProviderAccounts() {
+      return invokeCommand<ProviderAccount[]>("list_provider_accounts", {});
+    },
+    saveProviderAccount(input) {
+      return invokeCommand<ProviderAccount>("save_provider_account", { input });
+    },
+    deleteProviderAccount(accountId) {
+      return invokeCommand<GitOperationResult>("delete_provider_account", { accountId });
+    },
+    testProviderConnection(accountId) {
+      return invokeCommand<ProviderConnectionResult>("test_provider_connection", { accountId });
     },
     listBranches(repositoryPath) {
       return invokeCommand<BranchList>("list_branches", { repositoryPath });
@@ -225,6 +244,34 @@ export function getBrowserRepositoryClient(): RepositoryClient {
         ]
       });
     },
+    listProviderAccounts() {
+      return Promise.resolve(Array.from(browserProviderAccounts.values()).map(copyProviderAccount));
+    },
+    saveProviderAccount(input) {
+      const account = createBrowserProviderAccount(input);
+      browserProviderAccounts.set(account.id, account);
+      return Promise.resolve(copyProviderAccount(account));
+    },
+    deleteProviderAccount(accountId) {
+      browserProviderAccounts.delete(accountId);
+      return Promise.resolve({
+        command: `delete_provider_account ${accountId}`,
+        stderr: "",
+        stdout: "Provider account removed from browser preview state."
+      });
+    },
+    testProviderConnection(accountId) {
+      const account = browserProviderAccounts.get(accountId);
+      return Promise.resolve({
+        accountId,
+        message:
+          account === undefined
+            ? "Provider account not found in browser preview state."
+            : `Browser preview simulated connection for ${account.label}.`,
+        ok: account !== undefined,
+        statusCode: account === undefined ? null : 200
+      });
+    },
     listBranches() {
       return Promise.resolve({
         branches: [
@@ -274,6 +321,22 @@ export function getRepositoryStatus(repositoryPath: string): Promise<RepositoryS
 
 export function listProviderRemotes(repositoryPath: string): Promise<ProviderRemoteList> {
   return repositoryClient.listProviderRemotes(repositoryPath);
+}
+
+export function listProviderAccounts(): Promise<ProviderAccount[]> {
+  return repositoryClient.listProviderAccounts();
+}
+
+export function saveProviderAccount(input: ProviderAccountInput): Promise<ProviderAccount> {
+  return repositoryClient.saveProviderAccount(input);
+}
+
+export function deleteProviderAccount(accountId: string): Promise<GitOperationResult> {
+  return repositoryClient.deleteProviderAccount(accountId);
+}
+
+export function testProviderConnection(accountId: string): Promise<ProviderConnectionResult> {
+  return repositoryClient.testProviderConnection(accountId);
 }
 
 export function getFileDiff(args: FileDiffArgs): Promise<FileDiff> {
@@ -358,6 +421,30 @@ function browserMutationResult(command: string): GitOperationResult {
     stderr: "",
     stdout: "Open the app through Tauri to run mutating Git commands."
   };
+}
+
+const browserProviderAccounts = new Map<string, ProviderAccount>();
+
+function createBrowserProviderAccount(input: ProviderAccountInput): ProviderAccount {
+  const baseUrl = input.baseUrl.trim();
+  const label = input.label.trim();
+
+  return {
+    baseUrl,
+    id: `browser-${input.providerKind}-${slugBrowserAccountPart(baseUrl)}-${slugBrowserAccountPart(label)}`,
+    label,
+    providerKind: input.providerKind,
+    tokenConfigured: input.token.trim().length > 0
+  };
+}
+
+function copyProviderAccount(account: ProviderAccount): ProviderAccount {
+  return { ...account };
+}
+
+function slugBrowserAccountPart(value: string): string {
+  const slug = value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return slug.length === 0 ? "account" : slug;
 }
 
 function isBrowserCommitMatch(commit: CommitSummary, query: string): boolean {

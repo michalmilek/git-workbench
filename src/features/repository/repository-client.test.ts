@@ -5,6 +5,8 @@ import type {
   BranchList,
   FileDiff,
   GitOperationResult,
+  ProviderAccount,
+  ProviderConnectionResult,
   ProviderRemoteList,
   RepositoryStatus,
   StashEntry
@@ -44,6 +46,15 @@ describe("createRepositoryClient", () => {
     await client.applyStash({ repositoryPath: "/repo", stashRef: "stash@{0}" });
     await client.popStash({ repositoryPath: "/repo", stashRef: "stash@{1}" });
     await client.dropStash({ repositoryPath: "/repo", stashRef: "stash@{2}" });
+    await client.listProviderAccounts();
+    await client.saveProviderAccount({
+      baseUrl: "https://gitlab.company.test",
+      label: "Company GitLab",
+      providerKind: "customGitlab",
+      token: "secret-token"
+    });
+    await client.deleteProviderAccount("company-gitlab");
+    await client.testProviderConnection("company-gitlab");
 
     expect(calls).toEqual([
       { args: { repositoryPath: "/repo" }, command: "get_repository_status" },
@@ -71,7 +82,21 @@ describe("createRepositoryClient", () => {
       { args: { message: "wip changes", repositoryPath: "/repo" }, command: "create_stash" },
       { args: { repositoryPath: "/repo", stashRef: "stash@{0}" }, command: "apply_stash" },
       { args: { repositoryPath: "/repo", stashRef: "stash@{1}" }, command: "pop_stash" },
-      { args: { repositoryPath: "/repo", stashRef: "stash@{2}" }, command: "drop_stash" }
+      { args: { repositoryPath: "/repo", stashRef: "stash@{2}" }, command: "drop_stash" },
+      { args: {}, command: "list_provider_accounts" },
+      {
+        args: {
+          input: {
+            baseUrl: "https://gitlab.company.test",
+            label: "Company GitLab",
+            providerKind: "customGitlab",
+            token: "secret-token"
+          }
+        },
+        command: "save_provider_account"
+      },
+      { args: { accountId: "company-gitlab" }, command: "delete_provider_account" },
+      { args: { accountId: "company-gitlab" }, command: "test_provider_connection" }
     ]);
   });
 });
@@ -179,11 +204,57 @@ describe("browser repository client", () => {
       stdout: "Open the app through Tauri to run mutating Git commands."
     });
   });
+
+  test("persists provider accounts in memory without returning saved tokens", async () => {
+    const client = getBrowserRepositoryClient();
+    const input = {
+      baseUrl: "https://github.com",
+      label: "Personal GitHub",
+      providerKind: "github" as const,
+      token: "very-secret-token"
+    };
+
+    const savedAccount = await client.saveProviderAccount(input);
+
+    expect(savedAccount).toMatchObject({
+      baseUrl: "https://github.com",
+      label: "Personal GitHub",
+      providerKind: "github",
+      tokenConfigured: true
+    });
+    expect(JSON.stringify(savedAccount)).not.toContain(input.token);
+
+    await expect(client.listProviderAccounts()).resolves.toContainEqual(savedAccount);
+
+    await expect(client.testProviderConnection(savedAccount.id)).resolves.toEqual({
+      accountId: savedAccount.id,
+      message: "Browser preview simulated connection for Personal GitHub.",
+      ok: true,
+      statusCode: 200
+    });
+
+    await expect(client.deleteProviderAccount(savedAccount.id)).resolves.toEqual({
+      command: `delete_provider_account ${savedAccount.id}`,
+      stderr: "",
+      stdout: "Provider account removed from browser preview state."
+    });
+    await expect(client.listProviderAccounts()).resolves.not.toContainEqual(savedAccount);
+  });
 });
 
 function responseForCommand(
   command: string
-): Promise<RepositoryStatus | FileDiff | GitOperationResult | BranchList | StashEntry[] | ProviderRemoteList> {
+): Promise<
+  | RepositoryStatus
+  | FileDiff
+  | GitOperationResult
+  | BranchList
+  | StashEntry[]
+  | ProviderRemoteList
+  | ProviderAccount[]
+  | ProviderAccount
+  | ProviderConnectionResult
+> {
   if (command === "get_repository_status") {
     return Promise.resolve({
       ahead: 0,
@@ -208,6 +279,29 @@ function responseForCommand(
 
   if (command === "list_provider_remotes") {
     return Promise.resolve({ remotes: [] });
+  }
+
+  if (command === "list_provider_accounts") {
+    return Promise.resolve([]);
+  }
+
+  if (command === "save_provider_account") {
+    return Promise.resolve({
+      baseUrl: "https://gitlab.company.test",
+      id: "company-gitlab",
+      label: "Company GitLab",
+      providerKind: "customGitlab",
+      tokenConfigured: true
+    });
+  }
+
+  if (command === "test_provider_connection") {
+    return Promise.resolve({
+      accountId: "company-gitlab",
+      message: "Connected",
+      ok: true,
+      statusCode: 200
+    });
   }
 
   if (command === "list_stashes") {

@@ -29,6 +29,9 @@ Implemented on `main`:
 - Commit details with body, changed files, and patch text.
 - History filtering by subject, author, oid, and refs.
 - Provider remote detection for GitHub, GitLab.com, and self-hosted GitLab-style hosts.
+- Provider account configuration with non-secret metadata in app config.
+- Provider token storage in the OS keychain.
+- Provider API connection testing for configured accounts.
 - Latest operation result/error panel with command, stdout, and stderr.
 - Persistent command log in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
@@ -36,7 +39,7 @@ Implemented on `main`:
 Not implemented yet:
 
 - Hunk-level staging.
-- Provider account setup and PR/MR views.
+- PR/MR views and CI status.
 - Merge/rebase preview and conflict recovery.
 
 See [docs/roadmap.md](docs/roadmap.md) for the active roadmap.
@@ -132,7 +135,5 @@ docs/
 
 The next milestone is provider setup:
 
-- Add provider account configuration.
-- Store provider tokens in the OS keychain.
-- Test provider API connections.
 - Show PR/MR lists and CI status for the active repository.
+- Open PR/MR and pipeline links externally.
