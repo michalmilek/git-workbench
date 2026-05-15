@@ -10,6 +10,7 @@ import {
   IconMinus,
   IconPlus,
   IconRefresh,
+  IconServer,
   IconStack2,
   IconTrash,
   IconUpload
@@ -42,6 +43,7 @@ import {
   getRepositoryStatus,
   listBranches,
   listCommitHistory,
+  listProviderRemotes,
   listStashes,
   popStash,
   pullRepository,
@@ -70,6 +72,8 @@ import type {
   DiffMode,
   FileDiff,
   GitOperationResult,
+  ProviderKind,
+  ProviderRemote,
   RepositoryStatus,
   StashEntry,
   StatusFile
@@ -116,6 +120,8 @@ export function App() {
   const [repositoryPath, setRepositoryPath] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ViewMode>("changes");
   const [status, setStatus] = useState<RepositoryStatus | null>(null);
+  const [providerRemotes, setProviderRemotes] = useState<ProviderRemote[]>([]);
+  const [providerLoading, setProviderLoading] = useState(false);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [diffMode, setDiffMode] = useState<DiffMode>("worktree");
   const [diff, setDiff] = useState<FileDiff | null>(null);
@@ -139,6 +145,7 @@ export function App() {
   const repositoryLoadRequestId = useRef(0);
   const diffRequestId = useRef(0);
   const referenceRequestId = useRef(0);
+  const providerRequestId = useRef(0);
   const historyRequestId = useRef(0);
   const commitDetailsRequestId = useRef(0);
   const commandLogId = useRef(0);
@@ -183,10 +190,9 @@ export function App() {
     const repositoryLoadRequest = createRepositoryLoadRequest();
     invalidateDiffRequests();
     invalidateHistoryRequests();
+    const providerRequest = createProviderRequest();
     const requestedCommitOid = path === repositoryPath ? selectedCommitOid : null;
-    if (path !== repositoryPath) {
-      clearHistoryState();
-    }
+    const switchingRepository = path !== repositoryPath;
     const referenceRequest = createReferenceRequest();
     setBusyAction("status");
 
@@ -199,6 +205,10 @@ export function App() {
       const nextFile = chooseSelectedFile(nextStatus.files, requestedFilePath);
       const nextDiffMode = nextFile === null ? "worktree" : getPreferredDiffMode(nextFile);
 
+      if (switchingRepository) {
+        clearHistoryState();
+        setProviderRemotes([]);
+      }
       setRepositoryPath(path);
       setStatus(nextStatus);
       setSelectedFilePath(nextFile?.path ?? null);
@@ -213,7 +223,11 @@ export function App() {
         }
       }
 
-      await Promise.all([loadRepositoryReferences(path, referenceRequest), loadRepositoryHistory(path, requestedCommitOid)]);
+      await Promise.all([
+        loadRepositoryReferences(path, referenceRequest),
+        loadRepositoryHistory(path, requestedCommitOid),
+        loadProviderRemotes(path, providerRequest)
+      ]);
     } catch (error) {
       if (!isCurrentRepositoryLoadRequest(repositoryLoadRequest)) {
         return;
@@ -222,11 +236,15 @@ export function App() {
       const operationError = describeOperationError(error);
       setFeedback({ kind: "error", error: operationError });
       recordOperationError("Refresh repository", operationError);
-      setDiff(null);
-      setBranches([]);
-      setStashes([]);
-      setSelectedStashRef(null);
-      clearHistoryState();
+      if (!switchingRepository) {
+        setDiff(null);
+        setBranches([]);
+        setStashes([]);
+        setProviderRemotes([]);
+        setProviderLoading(false);
+        setSelectedStashRef(null);
+        clearHistoryState();
+      }
     } finally {
       if (isCurrentRepositoryLoadRequest(repositoryLoadRequest)) {
         setBusyAction(null);
@@ -236,6 +254,28 @@ export function App() {
 
   async function loadRepositoryReferences(path: string, requestId: number) {
     await Promise.all([loadRepositoryBranches(path, requestId), loadRepositoryStashes(path, requestId)]);
+  }
+
+  async function loadProviderRemotes(path: string, requestId: number) {
+    setProviderLoading(true);
+
+    try {
+      const nextProviderRemotes = await listProviderRemotes(path);
+      if (isCurrentProviderRequest(requestId)) {
+        setProviderRemotes(nextProviderRemotes.remotes);
+      }
+    } catch (error) {
+      if (isCurrentProviderRequest(requestId)) {
+        const operationError = describeOperationError(error);
+        setFeedback({ kind: "error", error: operationError });
+        recordOperationError("List provider remotes", operationError);
+        setProviderRemotes([]);
+      }
+    } finally {
+      if (isCurrentProviderRequest(requestId)) {
+        setProviderLoading(false);
+      }
+    }
   }
 
   async function loadRepositoryBranches(path: string, requestId: number) {
@@ -676,6 +716,15 @@ export function App() {
 
   function isCurrentReferenceRequest(requestId: number): boolean {
     return referenceRequestId.current === requestId;
+  }
+
+  function createProviderRequest(): number {
+    providerRequestId.current += 1;
+    return providerRequestId.current;
+  }
+
+  function isCurrentProviderRequest(requestId: number): boolean {
+    return providerRequestId.current === requestId;
   }
 
   function createHistoryRequest(): number {
@@ -1297,6 +1346,8 @@ export function App() {
             </div>
           </div>
 
+          <ProviderRemotesPanel loading={providerLoading} remotes={providerRemotes} repositoryOpened={repositoryPath !== null} />
+
           <div className="mt-4 flex flex-col gap-3 rounded-md border bg-background p-3 text-sm">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 font-medium">
@@ -1574,6 +1625,92 @@ function renderDiffText(diff: FileDiff | null, busyAction: BusyAction): string {
   }
 
   return diff.text.length === 0 ? "No diff output." : diff.text;
+}
+
+function ProviderRemotesPanel({
+  loading,
+  remotes,
+  repositoryOpened
+}: {
+  loading: boolean;
+  remotes: ProviderRemote[];
+  repositoryOpened: boolean;
+}) {
+  return (
+    <div className="mt-4 flex flex-col gap-3 rounded-md border bg-background p-3 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 font-medium">
+          <IconServer aria-hidden="true" className="size-4 shrink-0" />
+          Providers
+        </div>
+        <Badge variant={loading ? "outline" : "secondary"}>{loading ? "Loading" : remotes.length}</Badge>
+      </div>
+
+      <div className="flex max-h-56 flex-col gap-2 overflow-auto">
+        {!repositoryOpened ? (
+          <p className="text-sm text-muted-foreground">No repository</p>
+        ) : remotes.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{loading ? "Loading" : "No remotes"}</p>
+        ) : (
+          remotes.map((remote) => <ProviderRemoteCard key={`${remote.remoteName}:${remote.fetchUrl ?? remote.pushUrl ?? ""}`} remote={remote} />)
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProviderRemoteCard({ remote }: { remote: ProviderRemote }) {
+  return (
+    <div className="rounded-md border p-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="truncate font-medium">{remote.remoteName}</p>
+        <Badge className="shrink-0" variant="secondary">
+          {providerKindLabels[remote.providerKind]}
+        </Badge>
+      </div>
+
+      <div className="mt-2 grid grid-cols-[76px_minmax(0,1fr)] gap-x-2 gap-y-1 text-xs">
+        <span className="text-muted-foreground">Host</span>
+        <span className="truncate">{formatProviderValue(remote.host)}</span>
+        <span className="text-muted-foreground">Owner/repo</span>
+        <span className="truncate">{formatProviderOwnerRepository(remote)}</span>
+      </div>
+
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <ProviderUrlAvailability label="Fetch" url={remote.fetchUrl} />
+        <ProviderUrlAvailability label="Push" url={remote.pushUrl} />
+      </div>
+    </div>
+  );
+}
+
+function ProviderUrlAvailability({ label, url }: { label: string; url: string | null }) {
+  const available = url !== null;
+
+  return (
+    <Badge className="justify-center" variant={available ? "secondary" : "outline"}>
+      {label}: {available ? "yes" : "no"}
+    </Badge>
+  );
+}
+
+const providerKindLabels: Record<ProviderKind, string> = {
+  customGitlab: "Custom GitLab",
+  github: "GitHub",
+  gitlab: "GitLab",
+  unknown: "Unknown"
+};
+
+function formatProviderValue(value: string | null): string {
+  return value ?? "unknown";
+}
+
+function formatProviderOwnerRepository(remote: ProviderRemote): string {
+  if (remote.owner === null && remote.repository === null) {
+    return "unknown";
+  }
+
+  return `${formatProviderValue(remote.owner)}/${formatProviderValue(remote.repository)}`;
 }
 
 function CommitGraphRail({ commit, index, total }: { commit: CommitSummary; index: number; total: number }) {

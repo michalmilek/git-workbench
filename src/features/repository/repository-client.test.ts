@@ -1,7 +1,14 @@
 import { describe, expect, test } from "vitest";
 
 import { createRepositoryClient, getBrowserRepositoryClient } from "./repository-client";
-import type { BranchList, FileDiff, GitOperationResult, RepositoryStatus, StashEntry } from "./repository-types";
+import type {
+  BranchList,
+  FileDiff,
+  GitOperationResult,
+  ProviderRemoteList,
+  RepositoryStatus,
+  StashEntry
+} from "./repository-types";
 
 type InvokeCall = {
   command: string;
@@ -18,6 +25,7 @@ describe("createRepositoryClient", () => {
     });
 
     await client.getRepositoryStatus("/repo");
+    await client.listProviderRemotes("/repo");
     await client.getFileDiff({ filePath: "src/App.tsx", repositoryPath: "/repo", staged: true });
     await client.stageFile({ filePath: "src/App.tsx", repositoryPath: "/repo" });
     await client.unstageFile({ filePath: "src/App.tsx", repositoryPath: "/repo" });
@@ -39,6 +47,7 @@ describe("createRepositoryClient", () => {
 
     expect(calls).toEqual([
       { args: { repositoryPath: "/repo" }, command: "get_repository_status" },
+      { args: { repositoryPath: "/repo" }, command: "list_provider_remotes" },
       {
         args: { filePath: "src/App.tsx", repositoryPath: "/repo", staged: true },
         command: "get_file_diff"
@@ -74,6 +83,30 @@ describe("browser repository client", () => {
     await expect(client.getRepositoryStatus("/repo")).resolves.toMatchObject({
       branch: "browser-preview",
       files: expect.arrayContaining([expect.objectContaining({ path: "src/app/App.tsx" })])
+    });
+    await expect(client.listProviderRemotes("/repo")).resolves.toEqual({
+      remotes: [
+        {
+          fetchUrl: "git@github.com:openai/codex.git",
+          host: "github.com",
+          owner: "openai",
+          providerKind: "github",
+          pushUrl: "git@github.com:openai/codex.git",
+          remoteName: "origin",
+          repository: "codex",
+          webUrl: "https://github.com/openai/codex"
+        },
+        {
+          fetchUrl: "ssh://git@gitlab.company.test/platform/workbench.git",
+          host: "gitlab.company.test",
+          owner: "platform",
+          providerKind: "customGitlab",
+          pushUrl: null,
+          remoteName: "company",
+          repository: "workbench",
+          webUrl: "https://gitlab.company.test/platform/workbench"
+        }
+      ]
     });
     await expect(client.stageFile({ filePath: "src/app/App.tsx", repositoryPath: "/repo" })).resolves.toEqual({
       command: "git add -- src/app/App.tsx",
@@ -148,7 +181,9 @@ describe("browser repository client", () => {
   });
 });
 
-function responseForCommand(command: string): Promise<RepositoryStatus | FileDiff | GitOperationResult | BranchList | StashEntry[]> {
+function responseForCommand(
+  command: string
+): Promise<RepositoryStatus | FileDiff | GitOperationResult | BranchList | StashEntry[] | ProviderRemoteList> {
   if (command === "get_repository_status") {
     return Promise.resolve({
       ahead: 0,
@@ -169,6 +204,10 @@ function responseForCommand(command: string): Promise<RepositoryStatus | FileDif
 
   if (command === "list_branches") {
     return Promise.resolve({ branches: [] });
+  }
+
+  if (command === "list_provider_remotes") {
+    return Promise.resolve({ remotes: [] });
   }
 
   if (command === "list_stashes") {
