@@ -30,6 +30,8 @@ describe("createRepositoryClient", () => {
     await client.createBranch({ branchName: "feature/new", repositoryPath: "/repo" });
     await client.deleteBranch({ branchName: "feature/old", repositoryPath: "/repo" });
     await client.listStashes("/repo");
+    await client.listCommitHistory({ query: "feature history", repositoryPath: "/repo" });
+    await client.getCommitDetails({ commitOid: "abc1234", repositoryPath: "/repo" });
     await client.createStash({ message: "wip changes", repositoryPath: "/repo" });
     await client.applyStash({ repositoryPath: "/repo", stashRef: "stash@{0}" });
     await client.popStash({ repositoryPath: "/repo", stashRef: "stash@{1}" });
@@ -55,6 +57,8 @@ describe("createRepositoryClient", () => {
       { args: { branchName: "feature/new", repositoryPath: "/repo" }, command: "create_branch" },
       { args: { branchName: "feature/old", repositoryPath: "/repo" }, command: "delete_branch" },
       { args: { repositoryPath: "/repo" }, command: "list_stashes" },
+      { args: { query: "feature history", repositoryPath: "/repo" }, command: "list_commit_history" },
+      { args: { commitOid: "abc1234", repositoryPath: "/repo" }, command: "get_commit_details" },
       { args: { message: "wip changes", repositoryPath: "/repo" }, command: "create_stash" },
       { args: { repositoryPath: "/repo", stashRef: "stash@{0}" }, command: "apply_stash" },
       { args: { repositoryPath: "/repo", stashRef: "stash@{1}" }, command: "pop_stash" },
@@ -87,6 +91,50 @@ describe("browser repository client", () => {
       { index: 0, message: "Browser preview stash", selector: "stash@{0}" },
       { index: 1, message: "Saved local edits", selector: "stash@{1}" }
     ]);
+    await expect(client.listCommitHistory({ query: "", repositoryPath: "/repo" })).resolves.toEqual([
+      {
+        authorEmail: "alex@example.test",
+        authorName: "Alex Rivera",
+        authoredAt: "2026-05-16T09:15:00+02:00",
+        oid: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        parents: ["6f5e4d3c2b1a0987654321fedcba9876543210ab"],
+        refs: ["HEAD", "browser-preview"],
+        shortOid: "a1b2c3d",
+        subject: "Add repository history view"
+      },
+      {
+        authorEmail: "sam@example.test",
+        authorName: "Sam Chen",
+        authoredAt: "2026-05-15T17:42:00+02:00",
+        oid: "6f5e4d3c2b1a0987654321fedcba9876543210ab",
+        parents: [],
+        refs: ["origin/main"],
+        shortOid: "6f5e4d3",
+        subject: "Wire repository status panel"
+      }
+    ]);
+    await expect(
+      client.getCommitDetails({
+        commitOid: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        repositoryPath: "/repo"
+      })
+    ).resolves.toMatchObject({
+      body: "Show commit history and changed files in the browser preview.",
+      commit: {
+        oid: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        subject: "Add repository history view"
+      },
+      diffText: expect.stringContaining("diff --git a/src/app/App.tsx b/src/app/App.tsx"),
+      files: [
+        {
+          additions: 42,
+          changeType: "modified",
+          deletions: 8,
+          path: "src/app/App.tsx",
+          previousPath: null
+        }
+      ]
+    });
     await expect(client.checkoutBranch({ branchName: "feature/demo-branch", repositoryPath: "/repo" })).resolves.toEqual({
       command: "git checkout feature/demo-branch",
       stderr: "",

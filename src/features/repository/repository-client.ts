@@ -1,6 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { BranchList, FileDiff, GitOperationResult, RepositoryStatus, StashEntry } from "./repository-types";
+import type {
+  BranchList,
+  CommitDetails,
+  CommitSummary,
+  FileDiff,
+  GitOperationResult,
+  RepositoryStatus,
+  StashEntry
+} from "./repository-types";
 
 type RepositoryPathArgs = {
   repositoryPath: string;
@@ -33,6 +41,14 @@ type StashRefArgs = RepositoryPathArgs & {
   stashRef: string;
 };
 
+type CommitHistoryArgs = RepositoryPathArgs & {
+  query: string;
+};
+
+type CommitDetailsArgs = RepositoryPathArgs & {
+  commitOid: string;
+};
+
 type InvokeCommand = <T>(command: string, args: Record<string, unknown>) => Promise<T>;
 
 export type RepositoryClient = {
@@ -53,6 +69,8 @@ export type RepositoryClient = {
   applyStash(args: StashRefArgs): Promise<GitOperationResult>;
   popStash(args: StashRefArgs): Promise<GitOperationResult>;
   dropStash(args: StashRefArgs): Promise<GitOperationResult>;
+  listCommitHistory(args: CommitHistoryArgs): Promise<CommitSummary[]>;
+  getCommitDetails(args: CommitDetailsArgs): Promise<CommitDetails>;
 };
 
 export function createRepositoryClient(invokeCommand: InvokeCommand): RepositoryClient {
@@ -84,6 +102,9 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
     getFileDiff(args) {
       return invokeCommand<FileDiff>("get_file_diff", args);
     },
+    getCommitDetails(args) {
+      return invokeCommand<CommitDetails>("get_commit_details", args);
+    },
     getRepositoryStatus(repositoryPath) {
       return invokeCommand<RepositoryStatus>("get_repository_status", { repositoryPath });
     },
@@ -92,6 +113,9 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
     },
     listStashes(repositoryPath) {
       return invokeCommand<StashEntry[]>("list_stashes", { repositoryPath });
+    },
+    listCommitHistory(args) {
+      return invokeCommand<CommitSummary[]>("list_commit_history", args);
     },
     popStash(args) {
       return invokeCommand<GitOperationResult>("pop_stash", args);
@@ -152,6 +176,11 @@ export function getBrowserRepositoryClient(): RepositoryClient {
 `
       });
     },
+    getCommitDetails(args) {
+      const details =
+        browserCommitDetails.find((commitDetails) => commitDetails.commit.oid === args.commitOid) ?? browserCommitDetails[0];
+      return Promise.resolve(details);
+    },
     getRepositoryStatus(repositoryPath) {
       return Promise.resolve({
         ahead: 1,
@@ -179,6 +208,14 @@ export function getBrowserRepositoryClient(): RepositoryClient {
         { index: 0, message: "Browser preview stash", selector: "stash@{0}" },
         { index: 1, message: "Saved local edits", selector: "stash@{1}" }
       ]);
+    },
+    listCommitHistory(args) {
+      const query = args.query.trim().toLocaleLowerCase();
+      if (query.length === 0) {
+        return Promise.resolve(browserCommitHistory);
+      }
+
+      return Promise.resolve(browserCommitHistory.filter((commit) => isBrowserCommitMatch(commit, query)));
     },
     popStash(args) {
       return Promise.resolve(browserMutationResult(`git stash pop ${args.stashRef}`));
@@ -252,6 +289,14 @@ export function listStashes(repositoryPath: string): Promise<StashEntry[]> {
   return repositoryClient.listStashes(repositoryPath);
 }
 
+export function listCommitHistory(args: CommitHistoryArgs): Promise<CommitSummary[]> {
+  return repositoryClient.listCommitHistory(args);
+}
+
+export function getCommitDetails(args: CommitDetailsArgs): Promise<CommitDetails> {
+  return repositoryClient.getCommitDetails(args);
+}
+
 export function createStash(args: CreateStashArgs): Promise<GitOperationResult> {
   return repositoryClient.createStash(args);
 }
@@ -279,3 +324,87 @@ function browserMutationResult(command: string): GitOperationResult {
     stdout: "Open the app through Tauri to run mutating Git commands."
   };
 }
+
+function isBrowserCommitMatch(commit: CommitSummary, query: string): boolean {
+  return (
+    commit.subject.toLocaleLowerCase().includes(query) ||
+    commit.authorName.toLocaleLowerCase().includes(query) ||
+    commit.authorEmail.toLocaleLowerCase().includes(query) ||
+    commit.oid.toLocaleLowerCase().includes(query) ||
+    commit.shortOid.toLocaleLowerCase().includes(query) ||
+    commit.refs.some((commitRef) => commitRef.toLocaleLowerCase().includes(query))
+  );
+}
+
+const browserCommitHistory: CommitSummary[] = [
+  {
+    authorEmail: "alex@example.test",
+    authorName: "Alex Rivera",
+    authoredAt: "2026-05-16T09:15:00+02:00",
+    oid: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    parents: ["6f5e4d3c2b1a0987654321fedcba9876543210ab"],
+    refs: ["HEAD", "browser-preview"],
+    shortOid: "a1b2c3d",
+    subject: "Add repository history view"
+  },
+  {
+    authorEmail: "sam@example.test",
+    authorName: "Sam Chen",
+    authoredAt: "2026-05-15T17:42:00+02:00",
+    oid: "6f5e4d3c2b1a0987654321fedcba9876543210ab",
+    parents: [],
+    refs: ["origin/main"],
+    shortOid: "6f5e4d3",
+    subject: "Wire repository status panel"
+  }
+];
+
+const browserCommitDetails: CommitDetails[] = [
+  {
+    body: "Show commit history and changed files in the browser preview.",
+    commit: browserCommitHistory[0],
+    diffText: `diff --git a/src/app/App.tsx b/src/app/App.tsx
+index 1111111..2222222 100644
+--- a/src/app/App.tsx
++++ b/src/app/App.tsx
+@@ -1,3 +1,4 @@
+ import { Button } from "@/components/ui/button";
++import { Badge } from "@/components/ui/badge";
+
+ export function App() {
+   return <GitWorkbench />;
+`,
+    files: [
+      {
+        additions: 42,
+        changeType: "modified",
+        deletions: 8,
+        path: "src/app/App.tsx",
+        previousPath: null
+      }
+    ]
+  },
+  {
+    body: "Create the initial repository status workspace used by the preview.",
+    commit: browserCommitHistory[1],
+    diffText: `diff --git a/src/features/repository/repository-client.ts b/src/features/repository/repository-client.ts
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/src/features/repository/repository-client.ts
+@@ -0,0 +1,3 @@
++export function getRepositoryStatus() {
++  return Promise.resolve();
++}
+`,
+    files: [
+      {
+        additions: 73,
+        changeType: "added",
+        deletions: 0,
+        path: "src/features/repository/repository-client.ts",
+        previousPath: null
+      }
+    ]
+  }
+];

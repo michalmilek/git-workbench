@@ -17,6 +17,7 @@ mod operation_error;
 
 use git::GitOperationResult;
 use git::branch::BranchList;
+use git::history::{CommitDetails, CommitSummary};
 use git::operations::FileDiff;
 use git::stash::StashEntry;
 use git::status::RepositoryStatus;
@@ -80,6 +81,22 @@ fn push_repository(repository_path: &str) -> Result<GitOperationResult, Operatio
 #[tauri::command]
 fn list_branches(repository_path: &str) -> Result<BranchList, OperationError> {
     git::branch::list_branches(std::path::Path::new(repository_path))
+}
+
+#[tauri::command]
+fn list_commit_history(
+    repository_path: &str,
+    query: Option<String>,
+) -> Result<Vec<CommitSummary>, OperationError> {
+    git::history::list_commit_history(std::path::Path::new(repository_path), query)
+}
+
+#[tauri::command]
+fn get_commit_details(
+    repository_path: &str,
+    commit_oid: &str,
+) -> Result<CommitDetails, OperationError> {
+    git::history::get_commit_details(std::path::Path::new(repository_path), commit_oid)
 }
 
 #[tauri::command]
@@ -159,6 +176,8 @@ pub fn run() -> tauri::Result<()> {
             pull_repository,
             push_repository,
             list_branches,
+            list_commit_history,
+            get_commit_details,
             checkout_branch,
             create_branch,
             delete_branch,

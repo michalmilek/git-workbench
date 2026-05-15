@@ -24,6 +24,10 @@ Implemented on `main`:
 - Local and remote branch list.
 - Local branch checkout, remote branch checkout as a local tracking branch, branch creation, and non-current local branch deletion.
 - Stash list, create, apply, pop, and drop.
+- Commit history across local and remote refs.
+- Compact branch graph rail in the history view.
+- Commit details with body, changed files, and patch text.
+- History filtering by subject, author, oid, and refs.
 - Latest operation result/error panel with command, stdout, and stderr.
 - Persistent command log in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
@@ -31,7 +35,6 @@ Implemented on `main`:
 Not implemented yet:
 
 - Hunk-level staging.
-- Commit history and branch graph.
 - Provider account setup and PR/MR views.
 - Merge/rebase preview and conflict recovery.
 
@@ -126,10 +129,10 @@ docs/
 
 ## Next Milestone
 
-The next milestone is repository history support:
+The next milestone is provider setup:
 
-- Commit history.
-- Branch graph.
-- Commit details.
-- Changed files for a selected commit.
-- Filtering and keyboard-first navigation for repeated history workflows.
+- Detect GitHub, GitLab.com, and self-hosted GitLab remotes.
+- Add provider account configuration.
+- Store provider tokens in the OS keychain.
+- Test provider API connections.
+- Show PR/MR lists and CI status for the active repository.
