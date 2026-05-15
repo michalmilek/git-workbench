@@ -54,3 +54,29 @@ export type StashEntry = {
   index: number;
   message: string;
 };
+
+export type CommitSummary = {
+  oid: string;
+  shortOid: string;
+  parents: string[];
+  subject: string;
+  authorName: string;
+  authorEmail: string;
+  authoredAt: string;
+  refs: string[];
+};
+
+export type CommitChangedFile = {
+  path: string;
+  previousPath: string | null;
+  changeType: "added" | "modified" | "deleted" | "renamed" | "copied" | "binary" | "unknown";
+  additions: number | null;
+  deletions: number | null;
+};
+
+export type CommitDetails = {
+  commit: CommitSummary;
+  body: string;
+  files: CommitChangedFile[];
+  diffText: string;
+};

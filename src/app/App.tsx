@@ -37,9 +37,11 @@ import {
   deleteBranch,
   dropStash,
   fetchRepository,
+  getCommitDetails,
   getFileDiff,
   getRepositoryStatus,
   listBranches,
+  listCommitHistory,
   listStashes,
   popStash,
   pullRepository,
@@ -62,6 +64,9 @@ import {
 } from "@/features/repository/repository-status";
 import type {
   BranchInfo,
+  CommitChangedFile,
+  CommitDetails,
+  CommitSummary,
   DiffMode,
   FileDiff,
   GitOperationResult,
@@ -71,10 +76,12 @@ import type {
 } from "@/features/repository/repository-types";
 import { cn } from "@/lib/utils";
 
+type ViewMode = "changes" | "history" | "stashes";
+
 const navigationItems = [
-  { active: true, icon: IconInbox, label: "Changes" },
-  { active: false, icon: IconHistory, label: "History" },
-  { active: false, icon: IconStack2, label: "Stashes" }
+  { icon: IconInbox, label: "Changes", view: "changes" },
+  { icon: IconHistory, label: "History", view: "history" },
+  { icon: IconStack2, label: "Stashes", view: "stashes" }
 ] as const;
 
 type OperationErrorDetails = {
@@ -107,10 +114,17 @@ export function App() {
   const [recentRepositories, setRecentRepositories] = useState(readRecentRepositories);
   const [repositoryPathInput, setRepositoryPathInput] = useState(readInitialRepositoryPath);
   const [repositoryPath, setRepositoryPath] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<ViewMode>("changes");
   const [status, setStatus] = useState<RepositoryStatus | null>(null);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [diffMode, setDiffMode] = useState<DiffMode>("worktree");
   const [diff, setDiff] = useState<FileDiff | null>(null);
+  const [history, setHistory] = useState<CommitSummary[]>([]);
+  const [historyFilter, setHistoryFilter] = useState("");
+  const [selectedCommitOid, setSelectedCommitOid] = useState<string | null>(null);
+  const [commitDetails, setCommitDetails] = useState<CommitDetails | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [commitDetailsLoading, setCommitDetailsLoading] = useState(false);
   const [commitSummary, setCommitSummary] = useState("");
   const [commitBody, setCommitBody] = useState("");
   const [amendCommit, setAmendCommit] = useState(false);
@@ -122,13 +136,18 @@ export function App() {
   const [commandLog, setCommandLog] = useState(readCommandLogEntries);
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [feedback, setFeedback] = useState<OperationFeedback>(null);
+  const repositoryLoadRequestId = useRef(0);
   const diffRequestId = useRef(0);
   const referenceRequestId = useRef(0);
+  const historyRequestId = useRef(0);
+  const commitDetailsRequestId = useRef(0);
   const commandLogId = useRef(0);
 
   const summary = useMemo(() => (status === null ? null : summarizeRepositoryStatus(status)), [status]);
+  const filteredHistory = useMemo(() => filterCommitHistory(history, historyFilter), [history, historyFilter]);
   const selectedFile = getSelectedFile(status, selectedFilePath);
   const selectedStash = getSelectedStash(stashes, selectedStashRef);
+  const selectedCommit = getSelectedCommit(history, selectedCommitOid);
   const selectedFileHasStagedChanges = selectedFile === null ? false : hasStagedChanges(selectedFile);
   const selectedFileHasWorktreeChanges = selectedFile === null ? false : hasWorktreeChanges(selectedFile);
   const canCommit =
@@ -161,12 +180,22 @@ export function App() {
   }
 
   async function loadRepositoryStatus(path: string, requestedFilePath: string | null) {
+    const repositoryLoadRequest = createRepositoryLoadRequest();
     invalidateDiffRequests();
+    invalidateHistoryRequests();
+    const requestedCommitOid = path === repositoryPath ? selectedCommitOid : null;
+    if (path !== repositoryPath) {
+      clearHistoryState();
+    }
     const referenceRequest = createReferenceRequest();
     setBusyAction("status");
 
     try {
       const nextStatus = await getRepositoryStatus(path);
+      if (!isCurrentRepositoryLoadRequest(repositoryLoadRequest)) {
+        return;
+      }
+
       const nextFile = chooseSelectedFile(nextStatus.files, requestedFilePath);
       const nextDiffMode = nextFile === null ? "worktree" : getPreferredDiffMode(nextFile);
 
@@ -179,10 +208,17 @@ export function App() {
 
       if (nextFile !== null) {
         await loadFileDiff(path, nextFile.path, nextDiffMode);
+        if (!isCurrentRepositoryLoadRequest(repositoryLoadRequest)) {
+          return;
+        }
       }
 
-      await loadRepositoryReferences(path, referenceRequest);
+      await Promise.all([loadRepositoryReferences(path, referenceRequest), loadRepositoryHistory(path, requestedCommitOid)]);
     } catch (error) {
+      if (!isCurrentRepositoryLoadRequest(repositoryLoadRequest)) {
+        return;
+      }
+
       const operationError = describeOperationError(error);
       setFeedback({ kind: "error", error: operationError });
       recordOperationError("Refresh repository", operationError);
@@ -190,8 +226,11 @@ export function App() {
       setBranches([]);
       setStashes([]);
       setSelectedStashRef(null);
+      clearHistoryState();
     } finally {
-      setBusyAction(null);
+      if (isCurrentRepositoryLoadRequest(repositoryLoadRequest)) {
+        setBusyAction(null);
+      }
     }
   }
 
@@ -229,6 +268,62 @@ export function App() {
         recordOperationError("List stashes", operationError);
         setStashes([]);
         setSelectedStashRef(null);
+      }
+    }
+  }
+
+  async function loadRepositoryHistory(path: string, requestedCommitOid: string | null) {
+    const requestId = createHistoryRequest();
+    setHistoryLoading(true);
+    setCommitDetailsLoading(false);
+    setCommitDetails(null);
+
+    try {
+      const nextHistory = await listCommitHistory({ query: "", repositoryPath: path });
+      if (isCurrentHistoryRequest(requestId)) {
+        const nextCommitOid = chooseSelectedCommitOid(nextHistory, requestedCommitOid);
+        setHistory(nextHistory);
+        setSelectedCommitOid(nextCommitOid);
+
+        if (nextCommitOid !== null) {
+          void loadCommitDetails(path, nextCommitOid);
+        }
+      }
+    } catch (error) {
+      if (isCurrentHistoryRequest(requestId)) {
+        const operationError = describeOperationError(error);
+        setFeedback({ kind: "error", error: operationError });
+        recordOperationError("List history", operationError);
+        setHistory([]);
+        setSelectedCommitOid(null);
+        setCommitDetails(null);
+      }
+    } finally {
+      if (isCurrentHistoryRequest(requestId)) {
+        setHistoryLoading(false);
+      }
+    }
+  }
+
+  async function loadCommitDetails(repository: string, commitOid: string) {
+    const requestId = createCommitDetailsRequest();
+    setCommitDetailsLoading(true);
+
+    try {
+      const nextDetails = await getCommitDetails({ commitOid, repositoryPath: repository });
+      if (isCurrentCommitDetailsRequest(requestId)) {
+        setCommitDetails(nextDetails);
+      }
+    } catch (error) {
+      if (isCurrentCommitDetailsRequest(requestId)) {
+        const operationError = describeOperationError(error);
+        setFeedback({ kind: "error", error: operationError });
+        recordOperationError("Load commit details", operationError);
+        setCommitDetails(null);
+      }
+    } finally {
+      if (isCurrentCommitDetailsRequest(requestId)) {
+        setCommitDetailsLoading(false);
       }
     }
   }
@@ -277,6 +372,16 @@ export function App() {
     setDiffMode(mode);
     setDiff(null);
     await loadFileDiff(repositoryPath, selectedFile.path, mode);
+  }
+
+  async function selectCommit(commit: CommitSummary) {
+    if (repositoryPath === null) {
+      return;
+    }
+
+    setSelectedCommitOid(commit.oid);
+    setCommitDetails(null);
+    await loadCommitDetails(repositoryPath, commit.oid);
   }
 
   async function stageSelectedFile() {
@@ -542,6 +647,28 @@ export function App() {
     diffRequestId.current += 1;
   }
 
+  function createRepositoryLoadRequest(): number {
+    repositoryLoadRequestId.current += 1;
+    return repositoryLoadRequestId.current;
+  }
+
+  function isCurrentRepositoryLoadRequest(requestId: number): boolean {
+    return repositoryLoadRequestId.current === requestId;
+  }
+
+  function invalidateHistoryRequests() {
+    historyRequestId.current += 1;
+    commitDetailsRequestId.current += 1;
+  }
+
+  function clearHistoryState() {
+    setHistory([]);
+    setSelectedCommitOid(null);
+    setCommitDetails(null);
+    setHistoryLoading(false);
+    setCommitDetailsLoading(false);
+  }
+
   function createReferenceRequest(): number {
     referenceRequestId.current += 1;
     return referenceRequestId.current;
@@ -549,6 +676,24 @@ export function App() {
 
   function isCurrentReferenceRequest(requestId: number): boolean {
     return referenceRequestId.current === requestId;
+  }
+
+  function createHistoryRequest(): number {
+    historyRequestId.current += 1;
+    return historyRequestId.current;
+  }
+
+  function isCurrentHistoryRequest(requestId: number): boolean {
+    return historyRequestId.current === requestId;
+  }
+
+  function createCommitDetailsRequest(): number {
+    commitDetailsRequestId.current += 1;
+    return commitDetailsRequestId.current;
+  }
+
+  function isCurrentCommitDetailsRequest(requestId: number): boolean {
+    return commitDetailsRequestId.current === requestId;
   }
 
   return (
@@ -688,10 +833,13 @@ export function App() {
           <nav className="mt-5 flex flex-col gap-1">
             {navigationItems.map((item) => (
               <Button
-                className={cn("justify-start", item.active && "bg-primary text-primary-foreground hover:bg-primary/80")}
+                className={cn("justify-start", activeView === item.view && "bg-primary text-primary-foreground hover:bg-primary/80")}
                 key={item.label}
+                onClick={() => {
+                  setActiveView(item.view);
+                }}
                 type="button"
-                variant={item.active ? "default" : "ghost"}
+                variant={activeView === item.view ? "default" : "ghost"}
               >
                 <item.icon aria-hidden="true" data-icon="inline-start" />
                 {item.label}
@@ -727,6 +875,8 @@ export function App() {
         </aside>
 
         <section className="min-w-0 p-6">
+          {activeView === "changes" ? (
+            <>
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0">
               <p className="text-sm text-muted-foreground">Changes</p>
@@ -845,6 +995,216 @@ export function App() {
               </pre>
             </div>
           </div>
+            </>
+          ) : activeView === "history" ? (
+            <>
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-sm text-muted-foreground">History</p>
+                  <h2 className="truncate text-2xl font-semibold">
+                    {repositoryPath === null ? "Open a repository" : `${history.length} commits`}
+                  </h2>
+                </div>
+                <div className="flex min-w-[340px] items-center gap-2">
+                  <label className="sr-only" htmlFor="history-filter">
+                    Filter history
+                  </label>
+                  <input
+                    className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                    id="history-filter"
+                    onChange={(event) => {
+                      setHistoryFilter(event.target.value);
+                    }}
+                    placeholder="Filter subject, author, oid, refs"
+                    value={historyFilter}
+                  />
+                  <Button
+                    disabled={busyAction !== null || (repositoryPath === null && repositoryPathInput.trim().length === 0)}
+                    onClick={() => {
+                      void refreshRepository();
+                    }}
+                    type="button"
+                    variant="outline"
+                  >
+                    <IconRefresh aria-hidden="true" data-icon="inline-start" />
+                    Refresh
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-5 grid grid-cols-[minmax(340px,42%)_minmax(0,1fr)] gap-4">
+                <div className="min-h-[620px] overflow-hidden rounded-md border">
+                  {repositoryPath === null ? (
+                    <div className="p-4 text-sm text-muted-foreground">Repository history will appear here.</div>
+                  ) : historyLoading ? (
+                    <div className="p-4 text-sm text-muted-foreground">Loading history...</div>
+                  ) : filteredHistory.length === 0 ? (
+                    <div className="p-4 text-sm text-muted-foreground">
+                      {historyFilter.trim().length === 0 ? "No commits found." : "No commits match the current filter."}
+                    </div>
+                  ) : (
+                    filteredHistory.map((commit, index) => (
+                      <button
+                        aria-pressed={selectedCommitOid === commit.oid}
+                        className={cn(
+                          "flex w-full min-w-0 gap-2 border-b px-3 py-2.5 text-left last:border-b-0 hover:bg-muted",
+                          selectedCommitOid === commit.oid && "bg-muted"
+                        )}
+                        key={commit.oid}
+                        onClick={() => {
+                          void selectCommit(commit);
+                        }}
+                        type="button"
+                      >
+                        <CommitGraphRail commit={commit} index={index} total={filteredHistory.length} />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="truncate text-sm font-medium">{commit.subject}</span>
+                            <CommitRefBadges refs={commit.refs} />
+                          </span>
+                          <span className="mt-1 block truncate text-xs text-muted-foreground">
+                            {commit.authorName} | {formatCommitDate(commit.authoredAt)} | {commit.shortOid}
+                          </span>
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+
+                <CommitDetailsView commit={selectedCommit} details={commitDetails} loading={commitDetailsLoading} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-sm text-muted-foreground">Stashes</p>
+                  <h2 className="truncate text-2xl font-semibold">
+                    {repositoryPath === null ? "Open a repository" : `${stashes.length} stash entries`}
+                  </h2>
+                </div>
+                <Button
+                  disabled={busyAction !== null || (repositoryPath === null && repositoryPathInput.trim().length === 0)}
+                  onClick={() => {
+                    void refreshRepository();
+                  }}
+                  type="button"
+                  variant="outline"
+                >
+                  <IconRefresh aria-hidden="true" data-icon="inline-start" />
+                  Refresh
+                </Button>
+              </div>
+
+              <div className="mt-5 grid grid-cols-[minmax(320px,40%)_minmax(0,1fr)] gap-4">
+                <div className="min-h-[520px] overflow-hidden rounded-md border">
+                  {repositoryPath === null ? (
+                    <div className="p-4 text-sm text-muted-foreground">Repository stashes will appear here.</div>
+                  ) : stashes.length === 0 ? (
+                    <div className="p-4 text-sm text-muted-foreground">No stashes found.</div>
+                  ) : (
+                    stashes.map((stash) => (
+                      <button
+                        className={cn(
+                          "block w-full border-b px-3 py-3 text-left text-sm last:border-b-0 hover:bg-muted",
+                          selectedStashRef === stash.selector && "bg-muted"
+                        )}
+                        disabled={busyAction !== null}
+                        key={stash.selector}
+                        onClick={() => {
+                          setSelectedStashRef(stash.selector);
+                        }}
+                        type="button"
+                      >
+                        <span className="flex items-center justify-between gap-3">
+                          <span className="font-medium">{stash.selector}</span>
+                          <Badge variant="secondary">#{stash.index}</Badge>
+                        </span>
+                        <span className="mt-1 block truncate text-muted-foreground">{stash.message}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+
+                <div className="min-h-[520px] min-w-0 rounded-md border bg-muted/20 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{selectedStash?.selector ?? "Stash operations"}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {selectedStash === null ? "Select a stash to apply, pop, or drop it" : selectedStash.message}
+                      </p>
+                    </div>
+                    <Badge variant={selectedStash === null ? "outline" : "secondary"}>
+                      {selectedStash === null ? "None" : `#${selectedStash.index}`}
+                    </Badge>
+                  </div>
+
+                  <form
+                    className="mt-4 flex gap-2"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void createRepositoryStash();
+                    }}
+                  >
+                    <label className="sr-only" htmlFor="stash-message-main">
+                      Stash message
+                    </label>
+                    <input
+                      className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                      id="stash-message-main"
+                      onChange={(event) => {
+                        setStashMessage(event.target.value);
+                      }}
+                      placeholder="Optional stash message"
+                      value={stashMessage}
+                    />
+                    <Button disabled={!canCreateStash} type="submit" variant="secondary">
+                      <IconPlus aria-hidden="true" data-icon="inline-start" />
+                      Stash
+                    </Button>
+                  </form>
+
+                  <div className="mt-4 flex gap-2">
+                    <Button
+                      disabled={!canRunSelectedStashOperation}
+                      onClick={() => void runSelectedStashOperation("apply-stash")}
+                      type="button"
+                      variant="secondary"
+                    >
+                      Apply
+                    </Button>
+                    <Button
+                      disabled={!canRunSelectedStashOperation}
+                      onClick={() => void runSelectedStashOperation("pop-stash")}
+                      type="button"
+                      variant="secondary"
+                    >
+                      Pop
+                    </Button>
+                    <Button
+                      disabled={!canRunSelectedStashOperation}
+                      onClick={() => void runSelectedStashOperation("drop-stash")}
+                      type="button"
+                      variant="secondary"
+                    >
+                      Drop
+                    </Button>
+                  </div>
+
+                  <Separator className="my-4" />
+
+                  {selectedStash === null ? (
+                    <p className="text-sm text-muted-foreground">No stash selected.</p>
+                  ) : (
+                    <div className="text-sm">
+                      <p className="font-medium">{selectedStash.selector}</p>
+                      <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{selectedStash.message}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </section>
 
         <aside className="flex min-w-0 flex-col border-l bg-muted/20 p-4">
@@ -1112,6 +1472,42 @@ function chooseSelectedStashRef(stashes: StashEntry[], requestedStashRef: string
   return stashes[0]?.selector ?? null;
 }
 
+function getSelectedCommit(commits: CommitSummary[], selectedCommitOid: string | null): CommitSummary | null {
+  if (selectedCommitOid === null) {
+    return null;
+  }
+
+  return commits.find((commit) => commit.oid === selectedCommitOid) ?? null;
+}
+
+function chooseSelectedCommitOid(commits: CommitSummary[], requestedCommitOid: string | null): string | null {
+  if (requestedCommitOid !== null && commits.some((commit) => commit.oid === requestedCommitOid)) {
+    return requestedCommitOid;
+  }
+
+  return commits[0]?.oid ?? null;
+}
+
+function filterCommitHistory(commits: CommitSummary[], filter: string): CommitSummary[] {
+  const query = filter.trim().toLocaleLowerCase();
+  if (query.length === 0) {
+    return commits;
+  }
+
+  return commits.filter((commit) => isCommitFilterMatch(commit, query));
+}
+
+function isCommitFilterMatch(commit: CommitSummary, query: string): boolean {
+  return (
+    commit.subject.toLocaleLowerCase().includes(query) ||
+    commit.authorName.toLocaleLowerCase().includes(query) ||
+    commit.authorEmail.toLocaleLowerCase().includes(query) ||
+    commit.oid.toLocaleLowerCase().includes(query) ||
+    commit.shortOid.toLocaleLowerCase().includes(query) ||
+    commit.refs.some((commitRef) => commitRef.toLocaleLowerCase().includes(query))
+  );
+}
+
 async function runSyncCommand(action: "fetch" | "pull" | "push", repositoryPath: string): Promise<GitOperationResult> {
   if (action === "fetch") {
     return fetchRepository({ repositoryPath });
@@ -1178,6 +1574,142 @@ function renderDiffText(diff: FileDiff | null, busyAction: BusyAction): string {
   }
 
   return diff.text.length === 0 ? "No diff output." : diff.text;
+}
+
+function CommitGraphRail({ commit, index, total }: { commit: CommitSummary; index: number; total: number }) {
+  const isMergeCommit = commit.parents.length > 1;
+
+  return (
+    <span className="relative flex w-8 shrink-0 self-stretch" aria-hidden="true">
+      {index === 0 ? null : <span className="absolute left-1/2 top-0 h-1/2 w-px -translate-x-1/2 bg-border" />}
+      {index === total - 1 ? null : <span className="absolute bottom-0 left-1/2 h-1/2 w-px -translate-x-1/2 bg-border" />}
+      <span className="relative m-auto size-3 rounded-full border-2 border-primary bg-background" />
+      {isMergeCommit ? <span className="absolute left-[22px] top-1/2 h-px w-2 bg-border" /> : null}
+    </span>
+  );
+}
+
+function CommitRefBadges({ refs }: { refs: string[] }) {
+  const visibleRefs = refs.slice(0, 3);
+  const hiddenRefCount = refs.length - visibleRefs.length;
+
+  if (refs.length === 0) {
+    return null;
+  }
+
+  return (
+    <span className="flex min-w-0 shrink-0 items-center gap-1">
+      {visibleRefs.map((commitRef) => (
+        <Badge className="max-w-28 truncate" key={commitRef} variant="secondary">
+          {commitRef}
+        </Badge>
+      ))}
+      {hiddenRefCount > 0 ? <Badge variant="outline">+{hiddenRefCount}</Badge> : null}
+    </span>
+  );
+}
+
+function CommitDetailsView({
+  commit,
+  details,
+  loading
+}: {
+  commit: CommitSummary | null;
+  details: CommitDetails | null;
+  loading: boolean;
+}) {
+  if (commit === null) {
+    return (
+      <div className="min-h-[620px] min-w-0 rounded-md border bg-muted/20 p-4 text-sm text-muted-foreground">
+        Select a commit to inspect its details.
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-[620px] min-w-0 rounded-md border bg-muted/20 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{commit.subject}</p>
+          <p className="mt-1 truncate text-xs text-muted-foreground">
+            {commit.authorName} &lt;{commit.authorEmail}&gt; | {formatCommitDate(commit.authoredAt)} | {commit.shortOid}
+          </p>
+        </div>
+        <CommitRefBadges refs={commit.refs} />
+      </div>
+
+      {loading ? (
+        <p className="mt-4 text-sm text-muted-foreground">Loading commit details...</p>
+      ) : details === null ? (
+        <p className="mt-4 text-sm text-muted-foreground">No commit details loaded.</p>
+      ) : (
+        <div className="mt-4 min-w-0">
+          <div>
+            <p className="text-xs font-medium uppercase text-muted-foreground">Body</p>
+            <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">
+              {details.body.length === 0 ? "No commit body." : details.body}
+            </p>
+          </div>
+
+          <Separator className="my-4" />
+
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-medium uppercase text-muted-foreground">Changed files</p>
+              <Badge variant="secondary">{details.files.length}</Badge>
+            </div>
+            <div className="mt-2 max-h-44 overflow-auto border-y">
+              {details.files.length === 0 ? (
+                <p className="py-3 text-sm text-muted-foreground">No changed files reported.</p>
+              ) : (
+                details.files.map((file) => <CommitChangedFileRow file={file} key={`${file.changeType}:${file.path}`} />)
+              )}
+            </div>
+          </div>
+
+          <Separator className="my-4" />
+
+          <div>
+            <p className="text-xs font-medium uppercase text-muted-foreground">Patch</p>
+            <pre className="mt-2 max-h-[280px] overflow-auto rounded-md bg-background p-3 text-xs leading-5">
+              {details.diffText.length === 0 ? "No patch text." : details.diffText}
+            </pre>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CommitChangedFileRow({ file }: { file: CommitChangedFile }) {
+  return (
+    <div className="grid grid-cols-[88px_minmax(0,1fr)_96px] items-center gap-3 border-b py-2 text-sm last:border-b-0">
+      <Badge variant="outline">{file.changeType}</Badge>
+      <div className="min-w-0">
+        <p className="truncate font-medium">{file.path}</p>
+        {file.previousPath === null ? null : <p className="truncate text-xs text-muted-foreground">from {file.previousPath}</p>}
+      </div>
+      <p className="text-right text-xs text-muted-foreground">{formatChangedFileStats(file)}</p>
+    </div>
+  );
+}
+
+function formatChangedFileStats(file: CommitChangedFile): string {
+  if (file.additions === null || file.deletions === null) {
+    return "binary";
+  }
+
+  return `+${file.additions} -${file.deletions}`;
+}
+
+function formatCommitDate(authoredAt: string): string {
+  return new Date(authoredAt).toLocaleString(undefined, {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+    year: "numeric"
+  });
 }
 
 function describeOperationError(error: unknown): OperationErrorDetails {
