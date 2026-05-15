@@ -28,6 +28,7 @@ Implemented on `main`:
 - Compact branch graph rail in the history view.
 - Commit details with body, changed files, and patch text.
 - History filtering by subject, author, oid, and refs.
+- Provider remote detection for GitHub, GitLab.com, and self-hosted GitLab-style hosts.
 - Latest operation result/error panel with command, stdout, and stderr.
 - Persistent command log in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
@@ -131,7 +132,6 @@ docs/
 
 The next milestone is provider setup:
 
-- Detect GitHub, GitLab.com, and self-hosted GitLab remotes.
 - Add provider account configuration.
 - Store provider tokens in the OS keychain.
 - Test provider API connections.

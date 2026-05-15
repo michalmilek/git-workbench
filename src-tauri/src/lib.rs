@@ -19,6 +19,7 @@ use git::GitOperationResult;
 use git::branch::BranchList;
 use git::history::{CommitDetails, CommitSummary};
 use git::operations::FileDiff;
+use git::provider::ProviderRemoteList;
 use git::stash::StashEntry;
 use git::status::RepositoryStatus;
 use operation_error::OperationError;
@@ -89,6 +90,11 @@ fn list_commit_history(
     query: Option<String>,
 ) -> Result<Vec<CommitSummary>, OperationError> {
     git::history::list_commit_history(std::path::Path::new(repository_path), query)
+}
+
+#[tauri::command]
+fn list_provider_remotes(repository_path: &str) -> Result<ProviderRemoteList, OperationError> {
+    git::provider::list_provider_remotes(std::path::Path::new(repository_path))
 }
 
 #[tauri::command]
@@ -177,6 +183,7 @@ pub fn run() -> tauri::Result<()> {
             push_repository,
             list_branches,
             list_commit_history,
+            list_provider_remotes,
             get_commit_details,
             checkout_branch,
             create_branch,

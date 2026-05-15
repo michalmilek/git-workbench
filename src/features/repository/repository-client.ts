@@ -6,6 +6,7 @@ import type {
   CommitSummary,
   FileDiff,
   GitOperationResult,
+  ProviderRemoteList,
   RepositoryStatus,
   StashEntry
 } from "./repository-types";
@@ -53,6 +54,7 @@ type InvokeCommand = <T>(command: string, args: Record<string, unknown>) => Prom
 
 export type RepositoryClient = {
   getRepositoryStatus(repositoryPath: string): Promise<RepositoryStatus>;
+  listProviderRemotes(repositoryPath: string): Promise<ProviderRemoteList>;
   getFileDiff(args: FileDiffArgs): Promise<FileDiff>;
   stageFile(args: FileOperationArgs): Promise<GitOperationResult>;
   unstageFile(args: FileOperationArgs): Promise<GitOperationResult>;
@@ -107,6 +109,9 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
     },
     getRepositoryStatus(repositoryPath) {
       return invokeCommand<RepositoryStatus>("get_repository_status", { repositoryPath });
+    },
+    listProviderRemotes(repositoryPath) {
+      return invokeCommand<ProviderRemoteList>("list_provider_remotes", { repositoryPath });
     },
     listBranches(repositoryPath) {
       return invokeCommand<BranchList>("list_branches", { repositoryPath });
@@ -194,6 +199,32 @@ export function getBrowserRepositoryClient(): RepositoryClient {
         upstream: repositoryPath
       });
     },
+    listProviderRemotes() {
+      return Promise.resolve({
+        remotes: [
+          {
+            fetchUrl: "git@github.com:openai/codex.git",
+            host: "github.com",
+            owner: "openai",
+            providerKind: "github",
+            pushUrl: "git@github.com:openai/codex.git",
+            remoteName: "origin",
+            repository: "codex",
+            webUrl: "https://github.com/openai/codex"
+          },
+          {
+            fetchUrl: "ssh://git@gitlab.company.test/platform/workbench.git",
+            host: "gitlab.company.test",
+            owner: "platform",
+            providerKind: "customGitlab",
+            pushUrl: null,
+            remoteName: "company",
+            repository: "workbench",
+            webUrl: "https://gitlab.company.test/platform/workbench"
+          }
+        ]
+      });
+    },
     listBranches() {
       return Promise.resolve({
         branches: [
@@ -239,6 +270,10 @@ const repositoryClient = hasTauriRuntime() ? createRepositoryClient(invoke) : ge
 
 export function getRepositoryStatus(repositoryPath: string): Promise<RepositoryStatus> {
   return repositoryClient.getRepositoryStatus(repositoryPath);
+}
+
+export function listProviderRemotes(repositoryPath: string): Promise<ProviderRemoteList> {
+  return repositoryClient.listProviderRemotes(repositoryPath);
 }
 
 export function getFileDiff(args: FileDiffArgs): Promise<FileDiff> {

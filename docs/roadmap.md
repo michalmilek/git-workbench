@@ -26,6 +26,7 @@ The repository already includes:
 - Stash basics: list, create, apply, pop, and drop.
 - Repository history, compact branch graph rail, commit details, changed files, and patch text.
 - History filtering across subject, author, oid, and refs.
+- Provider remote detection for GitHub, GitLab.com, and self-hosted GitLab-style hosts.
 - Persistent command log stored in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
 
@@ -54,6 +55,7 @@ These items are already implemented on `main`:
 - Compact branch graph rail in the history view.
 - Commit details with body, changed files, and patch text.
 - History filtering by subject, author, oid, and refs.
+- Provider remote detection for GitHub, GitLab.com, and self-hosted GitLab-style hosts.
 - Latest operation result/error display with command, stdout, and stderr.
 - Persistent command log stored in localStorage.
 - Frontend tests for repository summaries, recents, commit validation, and Tauri invoke payloads.
@@ -98,10 +100,10 @@ Goal: support the workflows users perform repeatedly during normal development.
 
 Goal: make GitHub, GitLab.com, and company GitLab instances first-class without taking over Git transport.
 
-- Detect provider type from remote URLs.
-- Support GitHub remotes.
-- Support GitLab.com remotes.
-- Support custom GitLab base URLs for self-hosted instances.
+- Done: detect provider type from remote URLs.
+- Done: support GitHub remotes.
+- Done: support GitLab.com remotes.
+- Done: support custom GitLab base URLs for self-hosted instances.
 - Add provider account configuration.
 - Store provider tokens in the OS keychain.
 - Keep non-secret provider metadata in local app config.
@@ -174,7 +176,7 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 8. Done: stash workflow.
 9. Done: persistent command log.
 10. Done: commit history and branch graph.
-11. Next: provider detection and account setup.
-12. Later: PR/MR list and CI status.
+11. In progress: provider detection and account setup.
+12. Next: PR/MR list and CI status.
 13. Later: merge and rebase preview.
 14. Later: conflict display and recovery.

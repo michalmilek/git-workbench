@@ -24,6 +24,23 @@ export type RepositoryStatus = {
   files: StatusFile[];
 };
 
+export type ProviderKind = "github" | "gitlab" | "customGitlab" | "unknown";
+
+export type ProviderRemote = {
+  remoteName: string;
+  providerKind: ProviderKind;
+  host: string | null;
+  owner: string | null;
+  repository: string | null;
+  fetchUrl: string | null;
+  pushUrl: string | null;
+  webUrl: string | null;
+};
+
+export type ProviderRemoteList = {
+  remotes: ProviderRemote[];
+};
+
 export type FileDiff = {
   path: string;
   text: string;
