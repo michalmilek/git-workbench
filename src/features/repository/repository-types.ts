@@ -25,6 +25,7 @@ export type RepositoryStatus = {
 };
 
 export type ProviderKind = "github" | "gitlab" | "customGitlab" | "unknown";
+export type ProviderAccountKind = Exclude<ProviderKind, "unknown">;
 
 export type ProviderRemote = {
   remoteName: string;
@@ -39,6 +40,28 @@ export type ProviderRemote = {
 
 export type ProviderRemoteList = {
   remotes: ProviderRemote[];
+};
+
+export type ProviderAccount = {
+  id: string;
+  providerKind: ProviderAccountKind;
+  baseUrl: string;
+  label: string;
+  tokenConfigured: boolean;
+};
+
+export type ProviderAccountInput = {
+  providerKind: ProviderAccountKind;
+  baseUrl: string;
+  label: string;
+  token: string;
+};
+
+export type ProviderConnectionResult = {
+  accountId: string;
+  ok: boolean;
+  statusCode: number | null;
+  message: string;
 };
 
 export type FileDiff = {

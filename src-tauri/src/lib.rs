@@ -14,6 +14,7 @@
 
 mod git;
 mod operation_error;
+mod provider_accounts;
 
 use git::GitOperationResult;
 use git::branch::BranchList;
@@ -192,7 +193,11 @@ pub fn run() -> tauri::Result<()> {
             create_stash,
             apply_stash,
             pop_stash,
-            drop_stash
+            drop_stash,
+            provider_accounts::list_provider_accounts,
+            provider_accounts::save_provider_account,
+            provider_accounts::delete_provider_account,
+            provider_accounts::test_provider_connection
         ])
         .run(tauri::generate_context!())
 }
