@@ -16,7 +16,9 @@ mod git;
 mod operation_error;
 
 use git::GitOperationResult;
+use git::branch::BranchList;
 use git::operations::FileDiff;
+use git::stash::StashEntry;
 use git::status::RepositoryStatus;
 use operation_error::OperationError;
 
@@ -75,6 +77,69 @@ fn push_repository(repository_path: &str) -> Result<GitOperationResult, Operatio
     git::operations::push_repository(std::path::Path::new(repository_path))
 }
 
+#[tauri::command]
+fn list_branches(repository_path: &str) -> Result<BranchList, OperationError> {
+    git::branch::list_branches(std::path::Path::new(repository_path))
+}
+
+#[tauri::command]
+fn checkout_branch(
+    repository_path: &str,
+    branch_name: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::branch::checkout_branch(std::path::Path::new(repository_path), branch_name)
+}
+
+#[tauri::command]
+fn create_branch(
+    repository_path: &str,
+    branch_name: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::branch::create_branch(std::path::Path::new(repository_path), branch_name)
+}
+
+#[tauri::command]
+fn delete_branch(
+    repository_path: &str,
+    branch_name: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::branch::delete_branch(std::path::Path::new(repository_path), branch_name)
+}
+
+#[tauri::command]
+fn list_stashes(repository_path: &str) -> Result<Vec<StashEntry>, OperationError> {
+    git::stash::list_stashes(std::path::Path::new(repository_path))
+}
+
+#[tauri::command]
+fn create_stash(
+    repository_path: &str,
+    message: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::stash::create_stash(std::path::Path::new(repository_path), message)
+}
+
+#[tauri::command]
+fn apply_stash(
+    repository_path: &str,
+    stash_ref: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::stash::apply_stash(std::path::Path::new(repository_path), stash_ref)
+}
+
+#[tauri::command]
+fn pop_stash(repository_path: &str, stash_ref: &str) -> Result<GitOperationResult, OperationError> {
+    git::stash::pop_stash(std::path::Path::new(repository_path), stash_ref)
+}
+
+#[tauri::command]
+fn drop_stash(
+    repository_path: &str,
+    stash_ref: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::stash::drop_stash(std::path::Path::new(repository_path), stash_ref)
+}
+
 /// Runs the native Tauri application.
 ///
 /// # Errors
@@ -92,7 +157,16 @@ pub fn run() -> tauri::Result<()> {
             commit_changes,
             fetch_repository,
             pull_repository,
-            push_repository
+            push_repository,
+            list_branches,
+            checkout_branch,
+            create_branch,
+            delete_branch,
+            list_stashes,
+            create_stash,
+            apply_stash,
+            pop_stash,
+            drop_stash
         ])
         .run(tauri::generate_context!())
 }

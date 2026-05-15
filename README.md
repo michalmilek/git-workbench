@@ -21,14 +21,16 @@ Implemented on `main`:
 - File-level stage and unstage.
 - Commit composer with summary, optional body, amend toggle, and staged-change validation.
 - Commit, fetch, pull, and push through the system `git`.
+- Local and remote branch list.
+- Local branch checkout, remote branch checkout as a local tracking branch, branch creation, and non-current local branch deletion.
+- Stash list, create, apply, pop, and drop.
 - Latest operation result/error panel with command, stdout, and stderr.
+- Persistent command log in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
 
 Not implemented yet:
 
 - Hunk-level staging.
-- Branch list, checkout, creation, and deletion.
-- Stash workflow.
 - Commit history and branch graph.
 - Provider account setup and PR/MR views.
 - Merge/rebase preview and conflict recovery.
@@ -124,11 +126,10 @@ docs/
 
 ## Next Milestone
 
-The next milestone is daily branch workflow support:
+The next milestone is repository history support:
 
-- Branch list.
-- Branch checkout.
-- Branch creation.
-- Branch deletion rules.
-- Stash basics.
-- Persistent command log.
+- Commit history.
+- Branch graph.
+- Commit details.
+- Changed files for a selected commit.
+- Filtering and keyboard-first navigation for repeated history workflows.

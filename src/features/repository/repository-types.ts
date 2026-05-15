@@ -37,3 +37,20 @@ export type GitOperationResult = {
 };
 
 export type DiffMode = "worktree" | "staged";
+
+export type BranchInfo = {
+  name: string;
+  branchType: "local" | "remote";
+  current: boolean;
+  upstream: string | null;
+};
+
+export type BranchList = {
+  branches: BranchInfo[];
+};
+
+export type StashEntry = {
+  selector: string;
+  index: number;
+  message: string;
+};
