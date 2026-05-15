@@ -22,6 +22,9 @@ The repository already includes:
 - GitHub repository with `main` protected by a ruleset requiring pull requests.
 - Real Git status parsing through `git status --porcelain=v2 -z --branch`.
 - Initial three-column workbench shell wired to local Git operations.
+- Daily branch workflow support for branch list, checkout, creation, and non-current local branch deletion.
+- Stash basics: list, create, apply, pop, and drop.
+- Persistent command log stored in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
 
 ## Completed So Far
@@ -42,9 +45,13 @@ These items are already implemented on `main`:
 - Commit composer with summary, optional body, amend toggle, and staged-change validation.
 - Commit creation through the system `git`.
 - Fetch, pull, and push commands through the system `git`.
+- Local and remote branch list.
+- Local branch checkout, remote branch checkout as a local tracking branch, branch creation, and non-current local branch deletion.
+- Stash list, create, apply, pop, and drop.
 - Latest operation result/error display with command, stdout, and stderr.
+- Persistent command log stored in localStorage.
 - Frontend tests for repository summaries, recents, commit validation, and Tauri invoke payloads.
-- Rust tests for status parsing, command argument construction, untracked diff rendering, and a real temporary Git repository flow.
+- Rust tests for status parsing, command argument construction, untracked diff rendering, branch workflows, stash workflows, and real temporary Git repository flows.
 
 ## P0: Usable Local Git Core
 
@@ -64,22 +71,22 @@ Goal: turn the current shell into the first useful desktop Git client.
 - Done: show operation result/error details and command output for each Git action.
 - Not done: live progress logs for long-running Git operations.
 
-Recommended next milestone: add branch list, checkout, branch creation, stash basics, and a persistent command log.
+Recommended next milestone: add commit history, branch graph, commit details, and changed files for selected commits.
 
 ## P1: Daily Branch Workflows
 
 Goal: support the workflows users perform repeatedly during normal development.
 
-- List local and remote branches.
-- Checkout branches.
-- Create branches from the current commit.
-- Delete branches, with active branch deletion blocked by the UI.
-- Show ahead and behind counts for the active branch.
-- Create, apply, pop, and drop stashes.
-- Display commit history.
-- Display a branch graph.
-- Show commit details and files changed by the selected commit.
-- Add a persistent command log for recent repository operations.
+- Done: list local and remote branches.
+- Done: checkout local branches and remote branches as local tracking branches.
+- Done: create branches from the current commit.
+- Done: delete non-current local branches, with active branch deletion blocked by the UI.
+- Done: show ahead and behind counts for the active branch.
+- Done: create, apply, pop, and drop stashes.
+- Not done: display commit history.
+- Not done: display a branch graph.
+- Not done: show commit details and files changed by the selected commit.
+- Done: add a persistent command log for recent repository operations.
 
 ## P2: Remotes And Providers
 
@@ -157,10 +164,10 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 4. Done: file-level staging and unstaging.
 5. Done: commit composer and commit creation.
 6. Done: fetch, pull, and push.
-7. Next: branch list, checkout, and branch creation.
-8. Next: stash workflow.
-9. Next: persistent command log.
-10. Later: commit history and branch graph.
+7. Done: branch list, checkout, and branch creation.
+8. Done: stash workflow.
+9. Done: persistent command log.
+10. Next: commit history and branch graph.
 11. Later: provider detection and account setup.
 12. Later: PR/MR list and CI status.
 13. Later: merge and rebase preview.

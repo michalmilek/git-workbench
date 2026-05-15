@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { createRepositoryClient, getBrowserRepositoryClient } from "./repository-client";
-import type { FileDiff, GitOperationResult, RepositoryStatus } from "./repository-types";
+import type { BranchList, FileDiff, GitOperationResult, RepositoryStatus, StashEntry } from "./repository-types";
 
 type InvokeCall = {
   command: string;
@@ -25,6 +25,15 @@ describe("createRepositoryClient", () => {
     await client.fetchRepository({ repositoryPath: "/repo" });
     await client.pullRepository({ repositoryPath: "/repo" });
     await client.pushRepository({ repositoryPath: "/repo" });
+    await client.listBranches("/repo");
+    await client.checkoutBranch({ branchName: "feature/worktree", repositoryPath: "/repo" });
+    await client.createBranch({ branchName: "feature/new", repositoryPath: "/repo" });
+    await client.deleteBranch({ branchName: "feature/old", repositoryPath: "/repo" });
+    await client.listStashes("/repo");
+    await client.createStash({ message: "wip changes", repositoryPath: "/repo" });
+    await client.applyStash({ repositoryPath: "/repo", stashRef: "stash@{0}" });
+    await client.popStash({ repositoryPath: "/repo", stashRef: "stash@{1}" });
+    await client.dropStash({ repositoryPath: "/repo", stashRef: "stash@{2}" });
 
     expect(calls).toEqual([
       { args: { repositoryPath: "/repo" }, command: "get_repository_status" },
@@ -40,7 +49,16 @@ describe("createRepositoryClient", () => {
       },
       { args: { repositoryPath: "/repo" }, command: "fetch_repository" },
       { args: { repositoryPath: "/repo" }, command: "pull_repository" },
-      { args: { repositoryPath: "/repo" }, command: "push_repository" }
+      { args: { repositoryPath: "/repo" }, command: "push_repository" },
+      { args: { repositoryPath: "/repo" }, command: "list_branches" },
+      { args: { branchName: "feature/worktree", repositoryPath: "/repo" }, command: "checkout_branch" },
+      { args: { branchName: "feature/new", repositoryPath: "/repo" }, command: "create_branch" },
+      { args: { branchName: "feature/old", repositoryPath: "/repo" }, command: "delete_branch" },
+      { args: { repositoryPath: "/repo" }, command: "list_stashes" },
+      { args: { message: "wip changes", repositoryPath: "/repo" }, command: "create_stash" },
+      { args: { repositoryPath: "/repo", stashRef: "stash@{0}" }, command: "apply_stash" },
+      { args: { repositoryPath: "/repo", stashRef: "stash@{1}" }, command: "pop_stash" },
+      { args: { repositoryPath: "/repo", stashRef: "stash@{2}" }, command: "drop_stash" }
     ]);
   });
 });
@@ -58,10 +76,31 @@ describe("browser repository client", () => {
       stderr: "",
       stdout: "Open the app through Tauri to run mutating Git commands."
     });
+    await expect(client.listBranches("/repo")).resolves.toEqual({
+      branches: [
+        { branchType: "local", current: true, name: "browser-preview", upstream: "origin/browser-preview" },
+        { branchType: "local", current: false, name: "feature/demo-branch", upstream: null },
+        { branchType: "remote", current: false, name: "origin/main", upstream: null }
+      ]
+    });
+    await expect(client.listStashes("/repo")).resolves.toEqual([
+      { index: 0, message: "Browser preview stash", selector: "stash@{0}" },
+      { index: 1, message: "Saved local edits", selector: "stash@{1}" }
+    ]);
+    await expect(client.checkoutBranch({ branchName: "feature/demo-branch", repositoryPath: "/repo" })).resolves.toEqual({
+      command: "git checkout feature/demo-branch",
+      stderr: "",
+      stdout: "Open the app through Tauri to run mutating Git commands."
+    });
+    await expect(client.createStash({ message: "", repositoryPath: "/repo" })).resolves.toEqual({
+      command: "git stash push",
+      stderr: "",
+      stdout: "Open the app through Tauri to run mutating Git commands."
+    });
   });
 });
 
-function responseForCommand(command: string): Promise<RepositoryStatus | FileDiff | GitOperationResult> {
+function responseForCommand(command: string): Promise<RepositoryStatus | FileDiff | GitOperationResult | BranchList | StashEntry[]> {
   if (command === "get_repository_status") {
     return Promise.resolve({
       ahead: 0,
@@ -78,6 +117,14 @@ function responseForCommand(command: string): Promise<RepositoryStatus | FileDif
       path: "src/App.tsx",
       text: "diff"
     });
+  }
+
+  if (command === "list_branches") {
+    return Promise.resolve({ branches: [] });
+  }
+
+  if (command === "list_stashes") {
+    return Promise.resolve([]);
   }
 
   return Promise.resolve({
