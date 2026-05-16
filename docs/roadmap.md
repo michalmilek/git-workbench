@@ -24,8 +24,8 @@ The repository already includes:
 - Initial three-column workbench shell wired to local Git operations.
 - Daily branch workflow support for branch list, checkout, creation, and non-current local branch deletion.
 - Stash basics: list, create, apply, pop, and drop.
-- Repository history, compact branch graph rail, commit details, changed files, and patch text.
-- History filtering across subject, author, oid, and refs.
+- Repository history, lane-based branch graph, commit details, changed files, and patch text.
+- History filtering across plain terms and scoped `author:`, `ref:`, `branch:`, `hash:`, `oid:`, `subject:`, and `merge:` queries.
 - Provider remote detection for GitHub, GitLab.com, and self-hosted GitLab-style hosts.
 - Provider account configuration with non-secret metadata in app config.
 - Provider token storage in the OS keychain.
@@ -64,9 +64,9 @@ These items are already implemented on `main`:
 - Local branch checkout, remote branch checkout as a local tracking branch, branch creation, and non-current local branch deletion.
 - Stash list, create, apply, pop, and drop.
 - Commit history across local and remote refs.
-- Compact branch graph rail in the history view.
+- Lane-based branch graph in the history view.
 - Commit details with body, changed files, and patch text.
-- History filtering by subject, author, oid, and refs.
+- History filtering by plain terms and scoped `author:`, `ref:`, `branch:`, `hash:`, `oid:`, `subject:`, and `merge:` queries.
 - Provider remote detection for GitHub, GitLab.com, and self-hosted GitLab-style hosts.
 - Provider account configuration with non-secret metadata in app config.
 - Provider token storage in the OS keychain.
@@ -102,7 +102,7 @@ Goal: turn the current shell into the first useful desktop Git client.
 - Done: show operation result/error details and command output for each Git action.
 - Done: live progress logs for long-running Git operations.
 
-Recommended next milestone: strengthen the branch graph and history filtering.
+Recommended next milestone: add smart commit grouping.
 
 ## P1: Daily Branch Workflows
 
@@ -115,7 +115,7 @@ Goal: support the workflows users perform repeatedly during normal development.
 - Done: show ahead and behind counts for the active branch.
 - Done: create, apply, pop, and drop stashes.
 - Done: display commit history.
-- Done: display a compact branch graph.
+- Done: display a lane-based branch graph.
 - Done: show commit details and files changed by the selected commit.
 - Done: add a persistent command log for recent repository operations.
 
@@ -156,9 +156,9 @@ Goal: make risky Git actions understandable before they run and recoverable afte
 
 Goal: build the features that make the app clearly better than a standard Git GUI.
 
-- Next: add a highly readable branch graph with strong filtering.
+- Done: add a highly readable branch graph with strong filtering.
 - Done: add "what will happen" previews before pull, push, merge, and rebase.
-- Add smart commit grouping for related changes.
+- Next: add smart commit grouping for related changes.
 - Add a multi-repository workspace.
 - Add a repository health panel with dirty state, ahead/behind counts, CI status, open PR/MR state, and last fetch time.
 - Add provider-neutral PR/MR views across GitHub and GitLab.
@@ -208,4 +208,5 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 15. Done: live operation queue with logs.
 16. Done: pull and push previews.
 17. Done: hunk-level staging.
-18. Next: branch graph readability and stronger history filtering.
+18. Done: branch graph readability and stronger history filtering.
+19. Next: smart commit grouping.
