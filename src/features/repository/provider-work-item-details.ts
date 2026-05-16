@@ -4,6 +4,7 @@ export type ProviderWorkItemDetailTone = "secondary" | "destructive" | "outline"
 
 export type ProviderWorkItemDetail = {
   selectedId: string;
+  accountId: string | null;
   title: string;
   providerLabel: string;
   reviewKindLabel: string;
@@ -36,6 +37,7 @@ export function buildProviderWorkItemDetails(items: ProviderWorkItem[], selected
 
   return {
     detail: {
+      accountId: item.accountId,
       authorLabel: item.author ?? "unknown author",
       branchFlowLabel: `${item.sourceBranch ?? "unknown"} -> ${item.targetBranch ?? "unknown"}`,
       checkLabel: check.label,

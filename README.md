@@ -148,6 +148,8 @@ docs/
 
 ## Next Milestone
 
-The next milestone is PR/MR review implementation:
+The next milestone is local PR/MR review drafts and safe comment submission:
 
-- Build read-only review details first, then local drafts, then explicit provider comment submission.
+- Add local top-level and inline draft validation.
+- Show explicit provider payload previews before sending comments.
+- Submit comments through provider APIs only after preview confirmation.

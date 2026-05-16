@@ -13,6 +13,7 @@ import type {
   GitOperationResult,
   ProviderAccount,
   ProviderRemoteList,
+  ProviderReviewDetails,
   ProviderWorkItem,
   ProviderWorkItemList,
   RepositoryStatus,
@@ -24,6 +25,7 @@ const repositoryMocks = vi.hoisted(() => ({
   getCommitDetails: vi.fn<() => Promise<CommitDetails>>(),
   getConflictState: vi.fn<() => Promise<ConflictState>>(),
   getFileDiff: vi.fn<(args: { filePath: string; repositoryPath: string; staged: boolean }) => Promise<FileDiff>>(),
+  getProviderReviewDetails: vi.fn<(args: { accountId: string; itemId: string; repositoryPath: string }) => Promise<ProviderReviewDetails>>(),
   getRepositoryStatus: vi.fn<() => Promise<RepositoryStatus>>(),
   listBranches: vi.fn<() => Promise<BranchList>>(),
   listCommitHistory: vi.fn<() => Promise<CommitSummary[]>>(),
@@ -128,6 +130,66 @@ describe("App repository health", () => {
     expect(providerWorkItemDetailsText(container)).toContain("Custom GitLab");
     expect(providerWorkItemDetailsText(container)).toContain("fix/provider-refresh -> main");
     expect(providerWorkItemDetailsText(container)).toContain("Failed");
+  });
+
+  test("loads provider review details for the selected work item", async () => {
+    repositoryMocks.listProviderWorkItems.mockResolvedValue({
+      items: [providerWorkItem({ id: "github:origin:42", title: "Add provider work panel" })],
+      message: "Loaded 1 provider work item."
+    });
+    repositoryMocks.getProviderReviewDetails.mockResolvedValue(
+      providerReviewDetails({
+        files: [providerReviewFile({ path: "src/app/App.tsx" })],
+        threads: [providerReviewThread({ path: "src/app/App.tsx" })]
+      })
+    );
+
+    await openRepository(container, "/repo");
+
+    expect(repositoryMocks.getProviderReviewDetails).toHaveBeenCalledWith({
+      accountId: "account-1",
+      itemId: "github:origin:42",
+      repositoryPath: "/repo"
+    });
+    expect(providerWorkItemDetailsText(container)).toContain("src/app/App.tsx");
+    expect(providerWorkItemDetailsText(container)).toContain("Can we keep this neutral?");
+  });
+
+  test("refreshing provider work reloads review details for the same selected work item", async () => {
+    repositoryMocks.listProviderWorkItems.mockResolvedValue({
+      items: [providerWorkItem({ id: "github:origin:42", title: "Add provider work panel" })],
+      message: "Loaded 1 provider work item."
+    });
+    repositoryMocks.getProviderReviewDetails
+      .mockResolvedValueOnce(
+        providerReviewDetails({
+          threads: [providerReviewThread({ comments: [{ author: "sam-chen", body: "First load", createdAt: null, id: "comment-1", system: false }] })]
+        })
+      )
+      .mockResolvedValueOnce(
+        providerReviewDetails({
+          threads: [providerReviewThread({ comments: [{ author: "sam-chen", body: "Reloaded details", createdAt: null, id: "comment-2", system: false }] })]
+        })
+      );
+
+    await openRepository(container, "/repo");
+    await clickButton(container, "Refresh");
+
+    expect(repositoryMocks.getProviderReviewDetails).toHaveBeenCalledTimes(2);
+    expect(providerWorkItemDetailsText(container)).toContain("Reloaded details");
+  });
+
+  test("keeps selected work item details visible when review details fail", async () => {
+    repositoryMocks.listProviderWorkItems.mockResolvedValue({
+      items: [providerWorkItem({ id: "github:origin:42", title: "Add provider work panel" })],
+      message: "Loaded 1 provider work item."
+    });
+    repositoryMocks.getProviderReviewDetails.mockRejectedValue(new Error("review failed"));
+
+    await openRepository(container, "/repo");
+
+    expect(providerWorkItemDetailsText(container)).toContain("Add provider work panel");
+    expect(providerWorkItemDetailsText(container)).toContain("review failed");
   });
 
   test("runs pull for selected workspace repositories only", async () => {
@@ -322,6 +384,7 @@ function resetRepositoryMocks() {
   repositoryMocks.getRepositoryStatus.mockResolvedValue(repositoryStatus());
   repositoryMocks.getConflictState.mockResolvedValue(noConflictState());
   repositoryMocks.getFileDiff.mockImplementation(async ({ filePath }) => ({ isBinary: false, path: filePath, text: filePath }));
+  repositoryMocks.getProviderReviewDetails.mockResolvedValue(providerReviewDetails());
   repositoryMocks.listBranches.mockResolvedValue({ branches: [] });
   repositoryMocks.listCommitHistory.mockResolvedValue([]);
   repositoryMocks.getCommitDetails.mockResolvedValue(commitDetails());
@@ -482,6 +545,60 @@ function providerWorkItem(overrides: Partial<ProviderWorkItem> = {}): ProviderWo
     targetBranch: "main",
     title: "Add provider work panel",
     webUrl: "https://github.com/openai/codex/pull/42",
+    ...overrides
+  };
+}
+
+function providerReviewDetails(overrides: Partial<ProviderReviewDetails> = {}): ProviderReviewDetails {
+  return {
+    author: "alex-rivera",
+    checkStatus: "running",
+    files: [],
+    itemId: "github:origin:42",
+    message: "Loaded review details.",
+    providerBaseUrl: "https://github.com",
+    providerKind: "github",
+    remoteName: "origin",
+    sourceBranch: "feature/provider-work-panel",
+    state: "open",
+    targetBranch: "main",
+    threads: [],
+    title: "Add provider work panel",
+    webUrl: "https://github.com/openai/codex/pull/42",
+    ...overrides
+  };
+}
+
+function providerReviewFile(overrides: Partial<ProviderReviewDetails["files"][number]> = {}): ProviderReviewDetails["files"][number] {
+  return {
+    additions: 24,
+    collapsed: false,
+    deletions: 6,
+    patch: "@@ -1,2 +1,3 @@",
+    path: "src/app/App.tsx",
+    position: null,
+    previousPath: null,
+    status: "modified",
+    tooLarge: false,
+    ...overrides
+  };
+}
+
+function providerReviewThread(overrides: Partial<ProviderReviewDetails["threads"][number]> = {}): ProviderReviewDetails["threads"][number] {
+  return {
+    comments: [
+      {
+        author: "sam-chen",
+        body: "Can we keep this neutral?",
+        createdAt: "2026-05-16T09:30:00.000Z",
+        id: "comment-1",
+        system: false
+      }
+    ],
+    id: "thread-1",
+    line: 42,
+    path: "src/app/App.tsx",
+    resolved: false,
     ...overrides
   };
 }

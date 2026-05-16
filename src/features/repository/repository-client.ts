@@ -14,6 +14,7 @@ import type {
   ProviderAccount,
   ProviderAccountInput,
   ProviderConnectionResult,
+  ProviderReviewDetails,
   ProviderRemoteList,
   ProviderWorkItemList,
   RepositoryStatus,
@@ -67,6 +68,11 @@ type CommitDetailsArgs = RepositoryPathArgs & {
   commitOid: string;
 };
 
+type ProviderReviewDetailsArgs = RepositoryPathArgs & {
+  accountId: string;
+  itemId: string;
+};
+
 type PreviewMergeArgs = RepositoryPathArgs & {
   sourceBranch: string;
 };
@@ -86,6 +92,7 @@ export type RepositoryClient = {
   getConflictState(repositoryPath: string): Promise<ConflictState>;
   listProviderRemotes(repositoryPath: string): Promise<ProviderRemoteList>;
   listProviderWorkItems(repositoryPath: string): Promise<ProviderWorkItemList>;
+  getProviderReviewDetails(args: ProviderReviewDetailsArgs): Promise<ProviderReviewDetails>;
   listProviderAccounts(): Promise<ProviderAccount[]>;
   saveProviderAccount(input: ProviderAccountInput): Promise<ProviderAccount>;
   deleteProviderAccount(accountId: string): Promise<GitOperationResult>;
@@ -185,6 +192,9 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
     },
     listProviderWorkItems(repositoryPath) {
       return invokeCommand<ProviderWorkItemList>("list_provider_work_items", { repositoryPath });
+    },
+    getProviderReviewDetails(args) {
+      return invokeCommand<ProviderReviewDetails>("get_provider_review_details", args);
     },
     listProviderAccounts() {
       return invokeCommand<ProviderAccount[]>("list_provider_accounts", {});
@@ -389,6 +399,9 @@ export function getBrowserRepositoryClient(): RepositoryClient {
     listProviderWorkItems() {
       return Promise.resolve(browserProviderWorkItems);
     },
+    getProviderReviewDetails(args) {
+      return Promise.resolve(browserProviderReviewDetails(args.itemId));
+    },
     listProviderAccounts() {
       return Promise.resolve(Array.from(browserProviderAccounts.values()).map(copyProviderAccount));
     },
@@ -481,6 +494,10 @@ export function listProviderRemotes(repositoryPath: string): Promise<ProviderRem
 
 export function listProviderWorkItems(repositoryPath: string): Promise<ProviderWorkItemList> {
   return repositoryClient.listProviderWorkItems(repositoryPath);
+}
+
+export function getProviderReviewDetails(args: ProviderReviewDetailsArgs): Promise<ProviderReviewDetails> {
+  return repositoryClient.getProviderReviewDetails(args);
 }
 
 export function listProviderAccounts(): Promise<ProviderAccount[]> {
@@ -695,6 +712,96 @@ const browserProviderWorkItems: ProviderWorkItemList = {
   ],
   message: "Browser preview provider work items."
 };
+
+function browserProviderReviewDetails(itemId: string): ProviderReviewDetails {
+  const item = browserProviderWorkItems.items.find((workItem) => workItem.id === itemId) ?? browserProviderWorkItems.items[0];
+
+  return {
+    author: item.author,
+    checkStatus: item.checkStatus,
+    files: [
+      {
+        additions: 24,
+        collapsed: false,
+        deletions: 6,
+        patch: `@@ -1,4 +1,6 @@
+ export function ProviderWorkItemsPanel() {
++  return <ProviderReviewPanel />;
+ }`,
+        path: "src/app/App.tsx",
+        position: {
+          baseSha: "base-browser",
+          headSha: "head-browser",
+          line: 42,
+          newLine: 42,
+          oldLine: null,
+          oldPath: null,
+          path: "src/app/App.tsx",
+          positionType: "text",
+          providerKind: item.providerKind,
+          side: "right",
+          startSha: "start-browser"
+        },
+        previousPath: null,
+        status: "modified",
+        tooLarge: false
+      },
+      {
+        additions: 8,
+        collapsed: false,
+        deletions: 1,
+        patch: "@@ -1,2 +1,3 @@",
+        path: "src/features/repository/repository-client.ts",
+        position: null,
+        previousPath: null,
+        status: "modified",
+        tooLarge: false
+      }
+    ],
+    itemId: item.id,
+    message: "Browser preview review details.",
+    providerBaseUrl: item.providerBaseUrl,
+    providerKind: item.providerKind,
+    remoteName: item.remoteName,
+    sourceBranch: item.sourceBranch,
+    state: item.state,
+    targetBranch: item.targetBranch,
+    threads: [
+      {
+        comments: [
+          {
+            author: "sam-chen",
+            body: "Can we keep this review panel provider-neutral?",
+            createdAt: "2026-05-16T09:30:00+02:00",
+            id: "comment-1",
+            system: false
+          }
+        ],
+        id: "thread-inline-1",
+        line: 42,
+        path: "src/app/App.tsx",
+        resolved: false
+      },
+      {
+        comments: [
+          {
+            author: "alex-rivera",
+            body: "Review details are ready for smoke testing.",
+            createdAt: "2026-05-16T09:35:00+02:00",
+            id: "comment-2",
+            system: false
+          }
+        ],
+        id: "thread-top-1",
+        line: null,
+        path: null,
+        resolved: false
+      }
+    ],
+    title: item.title,
+    webUrl: item.webUrl
+  };
+}
 
 function createBrowserProviderAccount(input: ProviderAccountInput): ProviderAccount {
   const baseUrl = input.baseUrl.trim();

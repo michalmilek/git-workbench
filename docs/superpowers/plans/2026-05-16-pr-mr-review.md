@@ -16,16 +16,16 @@
 - Create: `src-tauri/src/provider_reviews.rs`
 - Modify: `src-tauri/src/lib.rs`
 
-- [ ] Write failing Rust tests for GitHub pull request files URL construction.
-- [ ] Write failing Rust tests for GitHub review comment JSON parsing.
-- [ ] Write failing Rust tests for GitLab merge request diffs URL construction using URL-encoded project paths.
-- [ ] Write failing Rust tests for GitLab discussions JSON parsing.
-- [ ] Write failing Rust serialization tests for `ProviderReviewDetails` camelCase output with no token fields.
-- [ ] Implement provider-neutral review DTOs and parsers.
-- [ ] Register a read-only `get_provider_review_details` Tauri command.
-- [ ] Run `cd src-tauri && cargo test provider_reviews`.
-- [ ] Run `cd src-tauri && cargo fmt -- --check`.
-- [ ] Run `cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings`.
+- [x] Write failing Rust tests for GitHub pull request files URL construction.
+- [x] Write failing Rust tests for GitHub review comment JSON parsing.
+- [x] Write failing Rust tests for GitLab merge request diffs URL construction using URL-encoded project paths.
+- [x] Write failing Rust tests for GitLab discussions JSON parsing.
+- [x] Write failing Rust serialization tests for `ProviderReviewDetails` camelCase output with no token fields.
+- [x] Implement provider-neutral review DTOs and parsers.
+- [x] Register a read-only `get_provider_review_details` Tauri command.
+- [x] Run `cd src-tauri && cargo test provider_reviews`.
+- [x] Run `cd src-tauri && cargo fmt -- --check`.
+- [x] Run `cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings`.
 
 ### Task 2: Frontend Client And Review Helpers
 
@@ -36,14 +36,14 @@
 - Create: `src/features/repository/provider-review-details.ts`
 - Create: `src/features/repository/provider-review-details.test.ts`
 
-- [ ] Write failing client tests for `getProviderReviewDetails(repositoryPath, itemId)` invoking `get_provider_review_details`.
-- [ ] Write failing helper tests for grouping top-level and inline provider threads.
-- [ ] Write failing helper tests for file summary counts and too-large/collapsed flags.
-- [ ] Add provider review DTOs to `repository-types.ts`.
-- [ ] Add client method and browser fallback review details.
-- [ ] Implement review details helper functions.
-- [ ] Run `bun run test:front src/features/repository/repository-client.test.ts src/features/repository/provider-review-details.test.ts`.
-- [ ] Run `bun run typecheck`.
+- [x] Write failing client tests for `getProviderReviewDetails(repositoryPath, itemId)` invoking `get_provider_review_details`.
+- [x] Write failing helper tests for grouping top-level and inline provider threads.
+- [x] Write failing helper tests for file summary counts and too-large/collapsed flags.
+- [x] Add provider review DTOs to `repository-types.ts`.
+- [x] Add client method and browser fallback review details.
+- [x] Implement review details helper functions.
+- [x] Run `bun run test:front src/features/repository/repository-client.test.ts src/features/repository/provider-review-details.test.ts`.
+- [x] Run `bun run typecheck`.
 
 ### Task 3: Read-Only Review Workspace UI
 
@@ -51,15 +51,15 @@
 - Modify: `src/app/App.tsx`
 - Modify: `src/app/App.test.tsx`
 
-- [ ] Add failing App test that selecting a provider work item loads review details.
-- [ ] Add failing App test that review files and inline threads render in the Provider review panel.
-- [ ] Add failing App test that failed review loading shows an error without clearing the selected work item details.
-- [ ] Add review details state, request id, loading state, and error state.
-- [ ] Load review details when selected provider work item changes.
-- [ ] Render files, threads, top-level comments, loading, and unavailable states.
-- [ ] Keep existing external PR/MR and CI links working.
-- [ ] Run `bun run test:front src/app/App.test.tsx src/features/repository/provider-review-details.test.ts`.
-- [ ] Run `bun run typecheck`.
+- [x] Add failing App test that selecting a provider work item loads review details.
+- [x] Add failing App test that review files and inline threads render in the Provider review panel.
+- [x] Add failing App test that failed review loading shows an error without clearing the selected work item details.
+- [x] Add review details state, request id, loading state, and error state.
+- [x] Load review details when selected provider work item changes.
+- [x] Render files, threads, top-level comments, loading, and unavailable states.
+- [x] Keep existing external PR/MR and CI links working.
+- [x] Run `bun run test:front src/app/App.test.tsx src/features/repository/provider-review-details.test.ts`.
+- [x] Run `bun run typecheck`.
 
 ### Task 4: Local Drafts And Submit Preview
 
