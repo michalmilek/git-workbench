@@ -120,6 +120,13 @@ import {
   type WorkspaceRepository
 } from "@/features/repository/repository-workspace";
 import {
+  reconcileWorkspaceBatchSelection,
+  toggleWorkspaceBatchPath,
+  updateWorkspaceRepositorySnapshot,
+  workspaceBatchTargets,
+  type WorkspaceBatchAction
+} from "@/features/repository/workspace-batch";
+import {
   getPreferredDiffMode,
   hasRepositoryStagedChanges,
   hasStagedChanges,
@@ -170,6 +177,7 @@ type OperationFeedback =
   | null;
 
 type SyncAction = "fetch" | "pull" | "push";
+type WorkspaceBatchBusyAction = "workspace-fetch" | "workspace-pull" | "workspace-push";
 type SyncPreviewAction = "preview-pull" | "preview-push";
 type BranchAction = "checkout-branch" | "create-branch" | "delete-branch" | "preview-merge" | "preview-rebase";
 type StashAction = "create-stash" | "apply-stash" | "pop-stash" | "drop-stash";
@@ -185,6 +193,7 @@ type BusyAction =
   | "unstage"
   | "commit"
   | SyncAction
+  | WorkspaceBatchBusyAction
   | SyncPreviewAction
   | BranchAction
   | StashAction
@@ -220,6 +229,7 @@ const commitGraphLaneClasses = [
 export function App() {
   const [recentRepositories, setRecentRepositories] = useState(readRecentRepositories);
   const [workspaceRepositories, setWorkspaceRepositories] = useState<WorkspaceRepository[]>(readWorkspaceRepositories);
+  const [workspaceBatchSelectedPaths, setWorkspaceBatchSelectedPaths] = useState<string[]>([]);
   const [repositoryPathInput, setRepositoryPathInput] = useState(readInitialRepositoryPath);
   const [repositoryPath, setRepositoryPath] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ViewMode>("changes");
@@ -321,6 +331,13 @@ export function App() {
     providerAccountBaseUrl.trim().length > 0 &&
     providerAccountLabel.trim().length > 0 &&
     providerAccountToken.trim().length > 0;
+  const workspaceFetchTargets = workspaceBatchTargets("fetch", workspaceRepositories, workspaceBatchSelectedPaths);
+  const workspacePullTargets = workspaceBatchTargets("pull", workspaceRepositories, workspaceBatchSelectedPaths);
+  const workspacePushTargets = workspaceBatchTargets("push", workspaceRepositories, workspaceBatchSelectedPaths);
+
+  useEffect(() => {
+    setWorkspaceBatchSelectedPaths((selectedPaths) => reconcileWorkspaceBatchSelection(workspaceRepositories, selectedPaths));
+  }, [workspaceRepositories]);
 
   useEffect(() => {
     const requestId = providerAccountsRequestId.current + 1;
@@ -906,6 +923,70 @@ export function App() {
     });
   }
 
+  async function runWorkspaceBatchOperation(action: WorkspaceBatchAction) {
+    const targets = workspaceBatchTargets(action, workspaceRepositories, workspaceBatchSelectedPaths);
+
+    if (targets.length === 0) {
+      return;
+    }
+
+    setBusyAction(workspaceBatchBusyAction(action));
+    try {
+      for (const target of targets) {
+        await runWorkspaceBatchTarget(action, target);
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function runWorkspaceBatchTarget(action: WorkspaceBatchAction, target: string) {
+    const operationId = createOperationQueueId();
+    const operation = `${syncOperationLabel(action)} repo`;
+    const command = syncOperationCommand(action);
+    startOperationQueueEntry(operationId, operation, command);
+
+    try {
+      const result = await runSyncCommand(action, target, operationId);
+      finishQueuedOperation(operationId, "success", result);
+      setFeedback({ kind: "result", result });
+      recordOperationResult(operation, result);
+    } catch (error) {
+      const operationError = describeOperationError(error);
+      const result = operationErrorResult(operationError, command);
+      finishQueuedOperation(operationId, "error", result);
+      setFeedback({ kind: "error", error: operationError });
+      recordOperationError(operation, operationError);
+      return;
+    }
+
+    try {
+      await refreshWorkspaceSnapshot(target);
+    } catch (error) {
+      recordOperationError("Refresh workspace repository", describeOperationError(error));
+    }
+  }
+
+  async function refreshWorkspaceSnapshot(path: string) {
+    const nextStatus = await getRepositoryStatus(path);
+    const nextSummary = summarizeRepositoryStatus(nextStatus);
+    const snapshot = {
+      branchLabel: nextSummary.branchLabel,
+      changedFileCount: nextSummary.changedFileCount,
+      hasUntrackedFiles: nextSummary.hasUntrackedFiles,
+      syncLabel: nextSummary.syncLabel,
+      updatedAt: new Date().toISOString()
+    };
+
+    updateWorkspaceRepositories((repositories) => updateWorkspaceRepositorySnapshot(repositories, path, snapshot));
+    if (path === repositoryPath) {
+      setStatus(nextStatus);
+      const refreshedAt = new Date();
+      setRepositoryRefreshedAt(refreshedAt);
+      setRepositoryHealthNow(refreshedAt);
+    }
+  }
+
   async function previewSyncOperation(action: "pull" | "push") {
     if (repositoryPath === null) {
       return;
@@ -1326,6 +1407,10 @@ export function App() {
     });
   }
 
+  function toggleWorkspaceBatchRepository(path: string) {
+    setWorkspaceBatchSelectedPaths((selectedPaths) => toggleWorkspaceBatchPath(selectedPaths, path));
+  }
+
   function updateWorkspaceRepositories(updateRepositories: (repositories: WorkspaceRepository[]) => WorkspaceRepository[]) {
     setWorkspaceRepositories((repositories) => {
       const nextRepositories = updateRepositories(repositories);
@@ -1682,7 +1767,12 @@ export function App() {
           <div className="mt-auto flex flex-col gap-3">
             <WorkspaceRepositorySection
               busyAction={busyAction}
+              fetchTargetCount={workspaceFetchTargets.length}
+              onBatch={(action) => void runWorkspaceBatchOperation(action)}
               repositories={workspaceRepositories}
+              selectedPaths={workspaceBatchSelectedPaths}
+              selectedTargetCount={Math.max(workspacePullTargets.length, workspacePushTargets.length)}
+              onToggleBatchPath={toggleWorkspaceBatchRepository}
               onRemove={removeInactiveWorkspaceRepository}
               onSwitch={(path) => void switchWorkspaceRepository(path)}
             />
@@ -2591,6 +2681,18 @@ function syncOperationCommand(action: SyncAction): string {
   return "git push";
 }
 
+function workspaceBatchBusyAction(action: WorkspaceBatchAction): WorkspaceBatchBusyAction {
+  if (action === "fetch") {
+    return "workspace-fetch";
+  }
+
+  if (action === "pull") {
+    return "workspace-pull";
+  }
+
+  return "workspace-push";
+}
+
 function stashOperationLabel(action: Exclude<StashAction, "create-stash">): string {
   if (action === "apply-stash") {
     return "Apply stash";
@@ -2681,20 +2783,68 @@ function chooseDiffModeAfterHunkApply(file: StatusFile | null, requestedMode: Di
 
 function WorkspaceRepositorySection({
   busyAction,
+  fetchTargetCount,
+  onBatch,
   onRemove,
   onSwitch,
-  repositories
+  onToggleBatchPath,
+  repositories,
+  selectedPaths,
+  selectedTargetCount
 }: {
   busyAction: BusyAction;
+  fetchTargetCount: number;
+  onBatch(action: WorkspaceBatchAction): void;
   onRemove(path: string): void;
   onSwitch(path: string): void;
+  onToggleBatchPath(path: string): void;
   repositories: WorkspaceRepository[];
+  selectedPaths: string[];
+  selectedTargetCount: number;
 }) {
+  const batchDisabled = busyAction !== null;
+
   return (
     <section className="flex flex-col gap-2 rounded-md border bg-background p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium">Workspace</p>
         <Badge variant="secondary">{repositories.length}</Badge>
+      </div>
+
+      <div className="grid gap-1">
+        <Button
+          disabled={batchDisabled || fetchTargetCount === 0}
+          onClick={() => {
+            onBatch("fetch");
+          }}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Fetch all
+        </Button>
+        <Button
+          disabled={batchDisabled || selectedTargetCount === 0}
+          onClick={() => {
+            onBatch("pull");
+          }}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Pull selected
+        </Button>
+        <Button
+          disabled={batchDisabled || selectedTargetCount === 0}
+          onClick={() => {
+            onBatch("push");
+          }}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Push selected
+        </Button>
       </div>
 
       <div className="flex max-h-72 flex-col gap-2 overflow-auto">
@@ -2707,6 +2857,16 @@ function WorkspaceRepositorySection({
               key={repository.path}
             >
               <div className="flex min-w-0 items-start gap-1">
+                <input
+                  aria-label={`Select ${repository.path} for batch operations`}
+                  checked={selectedPaths.includes(repository.path)}
+                  className="mt-1 size-4 shrink-0"
+                  disabled={busyAction !== null}
+                  onChange={() => {
+                    onToggleBatchPath(repository.path);
+                  }}
+                  type="checkbox"
+                />
                 <button
                   className="min-w-0 flex-1 text-left disabled:cursor-default"
                   disabled={busyAction !== null || repository.active}

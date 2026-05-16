@@ -41,6 +41,7 @@ The repository already includes:
 - Operation queue with live Git command logs for long-running operations.
 - Smart commit grouping suggestions with conventional summaries, commit bodies, counts, and group staging.
 - Multi-repository workspace list with persisted repository snapshots and active repository switching.
+- Workspace batch operations for fetch all, pull selected, and push selected.
 - Repository health panel with dirty, sync, PR/MR, CI, and last-refresh summaries.
 - Persistent command log stored in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
@@ -86,6 +87,7 @@ These items are already implemented on `main`:
 - Operation queue with live Git command logs for long-running operations.
 - Smart commit grouping suggestions with conventional summaries, commit bodies, staged/worktree/conflict counts, and group staging that skips unresolved conflicts.
 - Multi-repository workspace list with persisted repository snapshots, branch/sync/change summaries, and active repository switching.
+- Workspace batch operations for fetch all, pull selected, and push selected.
 - Repository health panel with dirty, sync, PR/MR, CI, and last-refresh summaries.
 - Latest operation result/error display with command, stdout, and stderr.
 - Persistent command log stored in localStorage.
@@ -110,7 +112,7 @@ Goal: turn the current shell into the first useful desktop Git client.
 - Done: show operation result/error details and command output for each Git action.
 - Done: live progress logs for long-running Git operations.
 
-Recommended next milestone: add batch repository operations.
+Recommended next milestone: add company setup profiles for GitLab, VPN, and SSH.
 
 ## P1: Daily Branch Workflows
 
@@ -171,8 +173,8 @@ Goal: build the features that make the app clearly better than a standard Git GU
 - Done: add a multi-repository workspace.
 - Done: add a repository health panel with dirty state, ahead/behind counts, CI status, open PR/MR state, and last refresh time.
 - Done: add provider-neutral PR/MR views across GitHub and GitLab.
-- Next: add batch operations: fetch all, pull selected, push selected.
-- Add profiles for company GitLab, VPN, and SSH setups.
+- Done: add batch operations: fetch all, pull selected, push selected.
+- Next: add profiles for company GitLab, VPN, and SSH setups.
 - Add keyboard-first navigation for repeated workflows.
 
 ## Later Or Explicitly Out Of Scope For Now
@@ -222,4 +224,5 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 20. Done: multi-repository workspace.
 21. Done: repository health panel.
 22. Done: provider-neutral PR/MR views.
-23. Next: batch repository operations.
+23. Done: batch repository operations.
+24. Next: company GitLab, VPN, and SSH setup profiles.

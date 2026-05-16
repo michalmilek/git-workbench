@@ -36,6 +36,7 @@ Implemented on `main`:
 - Operation queue with live Git command logs for long-running operations.
 - Provider remote detection for GitHub, GitLab.com, and self-hosted GitLab-style hosts.
 - Multi-repository workspace list with persisted repository snapshots and active repository switching.
+- Workspace batch operations for fetch all, pull selected, and push selected.
 - Repository health panel with dirty, sync, PR/MR, CI, and last-refresh summaries.
 - Provider account configuration with non-secret metadata in app config.
 - Provider token storage in the OS keychain.
@@ -144,6 +145,6 @@ docs/
 
 ## Next Milestone
 
-The next milestone is batch repository operations:
+The next milestone is company setup profiles:
 
-- Fetch all, pull selected, and push selected repositories from the multi-repository workspace.
+- Capture GitLab, VPN, and SSH setup notes per profile so company repositories are easier to prepare.

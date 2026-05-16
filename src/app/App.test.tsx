@@ -9,6 +9,7 @@ import type {
   ConflictState,
   CommitDetails,
   FileDiff,
+  GitOperationResult,
   ProviderAccount,
   ProviderRemoteList,
   ProviderWorkItem,
@@ -27,7 +28,8 @@ const repositoryMocks = vi.hoisted(() => ({
   listProviderAccounts: vi.fn<() => Promise<ProviderAccount[]>>(),
   listProviderRemotes: vi.fn<() => Promise<ProviderRemoteList>>(),
   listProviderWorkItems: vi.fn<() => Promise<ProviderWorkItemList>>(),
-  listStashes: vi.fn<() => Promise<StashEntry[]>>()
+  listStashes: vi.fn<() => Promise<StashEntry[]>>(),
+  pullRepository: vi.fn<() => Promise<GitOperationResult>>()
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -123,6 +125,23 @@ describe("App repository health", () => {
     expect(providerWorkItemDetailsText(container)).toContain("fix/provider-refresh -> main");
     expect(providerWorkItemDetailsText(container)).toContain("Failed");
   });
+
+  test("runs pull for selected workspace repositories only", async () => {
+    repositoryMocks.pullRepository.mockResolvedValue({ command: "git pull", stderr: "", stdout: "Pulled selected repository." });
+
+    await openRepository(container, "/repo");
+    await openRepository(container, "/repo-two");
+    await clickCheckbox(container, "Select /repo for batch operations");
+    await clickButton(container, "Pull selected");
+
+    expect(repositoryMocks.pullRepository).toHaveBeenCalledTimes(1);
+    expect(repositoryMocks.pullRepository).toHaveBeenCalledWith({
+      operationId: expect.any(String),
+      repositoryPath: "/repo"
+    });
+    expect(container.textContent).toContain("Pull repo");
+    expect(container.textContent).toContain("Pulled selected repository.");
+  });
 });
 
 function installMemoryLocalStorage() {
@@ -167,6 +186,7 @@ function resetRepositoryMocks() {
   repositoryMocks.listProviderRemotes.mockResolvedValue({ remotes: [] });
   repositoryMocks.listProviderWorkItems.mockResolvedValue({ items: [], message: "No open provider work items found." });
   repositoryMocks.listStashes.mockResolvedValue([]);
+  repositoryMocks.pullRepository.mockResolvedValue({ command: "git pull", stderr: "", stdout: "" });
 }
 
 async function openRepository(container: HTMLElement, path: string) {
@@ -185,6 +205,15 @@ async function clickButton(container: HTMLElement, label: string) {
   await act(async () => {
     const button = findButton(container, label);
     button.click();
+  });
+
+  await flushReactWork();
+}
+
+async function clickCheckbox(container: HTMLElement, label: string) {
+  await act(async () => {
+    const checkbox = requiredElement<HTMLInputElement>(container.querySelector(`input[aria-label="${label}"]`));
+    checkbox.click();
   });
 
   await flushReactWork();
