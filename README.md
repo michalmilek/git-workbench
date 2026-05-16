@@ -28,6 +28,7 @@ Implemented on `main`:
 - Compact branch graph rail in the history view.
 - Commit details with body, changed files, and patch text.
 - History filtering by subject, author, oid, and refs.
+- Merge and rebase previews with source/target branch, planned command, commits, changed files, and likely conflict files.
 - Provider remote detection for GitHub, GitLab.com, and self-hosted GitLab-style hosts.
 - Provider account configuration with non-secret metadata in app config.
 - Provider token storage in the OS keychain.
@@ -43,7 +44,7 @@ Not implemented yet:
 
 - Hunk-level staging.
 - Full PR/MR review and inline commenting.
-- Merge/rebase preview and conflict recovery.
+- Merge/rebase execution with conflict recovery.
 
 See [docs/roadmap.md](docs/roadmap.md) for the active roadmap.
 
@@ -138,6 +139,5 @@ docs/
 
 The next milestone is safe complex operations:
 
-- Add merge and rebase previews.
-- Show planned command intent and likely conflict files where available.
+- Execute merge and rebase only after preview and confirmation.
 - Add conflict display and recovery actions.

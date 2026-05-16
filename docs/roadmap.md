@@ -33,6 +33,7 @@ The repository already includes:
 - Provider PR/MR work item list for the active repository.
 - Provider CI/check/pipeline status for listed PRs and MRs.
 - External PR/MR and CI/pipeline links through the system opener.
+- Merge and rebase previews with source/target branch, planned command, commits, changed files, and likely conflict files.
 - Persistent command log stored in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
 
@@ -68,6 +69,7 @@ These items are already implemented on `main`:
 - Provider PR/MR work item list for the active repository.
 - Provider CI/check/pipeline status for listed PRs and MRs.
 - External PR/MR and CI/pipeline links through the system opener.
+- Merge and rebase previews with source/target branch, planned command, commits, changed files, and likely conflict files.
 - Latest operation result/error display with command, stdout, and stderr.
 - Persistent command log stored in localStorage.
 - Frontend tests for repository summaries, recents, commit validation, and Tauri invoke payloads.
@@ -129,10 +131,10 @@ Goal: make GitHub, GitLab.com, and company GitLab instances first-class without 
 
 Goal: make risky Git actions understandable before they run and recoverable after failure.
 
-- Add merge preview.
-- Add rebase preview.
-- Show source branch, target branch, and planned command intent.
-- Detect likely conflict files when possible.
+- Done: add merge preview.
+- Done: add rebase preview.
+- Done: show source branch, target branch, and planned command intent.
+- Done: detect likely conflict files when possible.
 - Execute merge only after preview and confirmation.
 - Execute rebase only after preview and confirmation.
 - Show conflict files and conflict state.
@@ -190,5 +192,5 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 10. Done: commit history and branch graph.
 11. Done: provider detection and account setup.
 12. Done: PR/MR list and CI status.
-13. Next: merge and rebase preview.
-14. Later: conflict display and recovery.
+13. Done: merge and rebase preview.
+14. Next: conflict display and recovery.
