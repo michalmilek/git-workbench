@@ -58,6 +58,7 @@ import {
   type CommitGraphLane,
   type CommitGraphRow
 } from "@/features/repository/commit-history";
+import { commitGraphConnectorWidth, commitGraphLaneOffset, commitGraphRailWidth } from "@/features/repository/commit-graph-visuals";
 import { buildHunkPatch, parseDiffHunks, type ParsedDiff } from "@/features/repository/diff-hunks";
 import {
   applyOperationEvent,
@@ -248,14 +249,13 @@ const defaultProviderBaseUrls: Record<ProviderAccountKind, string> = {
 };
 
 const historyFilterHints = ["author:", "ref:", "hash:", "merge:"] as const;
-const commitGraphLaneWidth = 14;
 const commitGraphLaneClasses = [
-  "bg-sky-500",
-  "bg-emerald-500",
+  "bg-sky-600",
+  "bg-emerald-600",
   "bg-amber-500",
-  "bg-rose-500",
-  "bg-violet-500",
-  "bg-cyan-500"
+  "bg-rose-600",
+  "bg-violet-600",
+  "bg-cyan-600"
 ] as const;
 
 export function App() {
@@ -2602,8 +2602,8 @@ export function App() {
                         <button
                           aria-pressed={selectedCommitOid === commit.oid}
                           className={cn(
-                            "flex w-full min-w-0 gap-2 border-b px-3 py-2.5 text-left last:border-b-0 hover:bg-muted",
-                            selectedCommitOid === commit.oid && "bg-muted"
+                            "flex w-full min-w-0 gap-3 border-b px-3 py-2.5 text-left last:border-b-0 hover:bg-muted",
+                            selectedCommitOid === commit.oid && "bg-primary/5"
                           )}
                           key={commit.oid}
                           onClick={() => {
@@ -5250,32 +5250,37 @@ function formatProviderStatusCode(statusCode: number | null): string {
 }
 
 function CommitGraphRail({ row, selected }: { row: CommitGraphRow; selected: boolean }) {
-  const railWidth = row.laneCount * commitGraphLaneWidth;
+  const railWidth = commitGraphRailWidth(row.laneCount);
   const connectorStartLane = Math.min(...row.connectorLanes);
   const connectorEndLane = Math.max(...row.connectorLanes);
   const hasConnector = connectorStartLane !== connectorEndLane;
 
   return (
-    <span className="relative shrink-0 self-stretch" style={{ width: `${railWidth}px` }} aria-hidden="true">
+    <span
+      aria-hidden="true"
+      className="relative shrink-0 self-stretch"
+      data-testid="commit-graph-rail"
+      style={{ width: `${railWidth}px` }}
+    >
       {row.lanes.map((lane) => (
         <CommitGraphLaneSegments lane={lane} key={lane.lane} />
       ))}
       {hasConnector ? (
         <span
           className={cn(
-            "absolute top-1/2 h-px -translate-y-1/2 rounded-full",
+            "absolute top-1/2 h-0.5 -translate-y-1/2 rounded-full shadow-sm",
             commitGraphLaneColorClass(row.currentLane)
           )}
           style={{
             left: commitGraphLaneOffset(connectorStartLane),
-            width: `${(connectorEndLane - connectorStartLane) * commitGraphLaneWidth}px`
+            width: commitGraphConnectorWidth(connectorStartLane, connectorEndLane)
           }}
         />
       ) : null}
       <span
         className={cn(
-          "absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-background",
-          selected ? "border-primary ring-2 ring-primary/30" : "border-background",
+          "absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] bg-background shadow-sm",
+          selected ? "border-primary ring-4 ring-primary/25" : "border-background",
           commitGraphLaneColorClass(row.currentLane)
         )}
         style={{ left: commitGraphLaneOffset(row.currentLane) }}
@@ -5289,14 +5294,14 @@ function CommitGraphLaneSegments({ lane }: { lane: CommitGraphLane }) {
     <>
       {lane.continuesAbove ? (
         <span
-          className={cn("absolute top-0 h-1/2 w-px -translate-x-1/2 rounded-full", commitGraphLaneColorClass(lane.colorIndex))}
+          className={cn("absolute top-0 h-1/2 w-0.5 -translate-x-1/2 rounded-full shadow-sm", commitGraphLaneColorClass(lane.colorIndex))}
           style={{ left: commitGraphLaneOffset(lane.lane) }}
         />
       ) : null}
       {lane.continuesBelow ? (
         <span
           className={cn(
-            "absolute bottom-0 h-1/2 w-px -translate-x-1/2 rounded-full",
+            "absolute bottom-0 h-1/2 w-0.5 -translate-x-1/2 rounded-full shadow-sm",
             commitGraphLaneColorClass(lane.colorIndex)
           )}
           style={{ left: commitGraphLaneOffset(lane.lane) }}
@@ -5304,10 +5309,6 @@ function CommitGraphLaneSegments({ lane }: { lane: CommitGraphLane }) {
       ) : null}
     </>
   );
-}
-
-function commitGraphLaneOffset(laneIndex: number): string {
-  return `${laneIndex * commitGraphLaneWidth + commitGraphLaneWidth / 2}px`;
 }
 
 function commitGraphLaneColorClass(laneIndex: number): string {
