@@ -19,6 +19,7 @@ Implemented on `main`:
 - Porcelain v2 `-z` status parsing for paths with spaces, renames, copies, conflicts, untracked files, and ignored files.
 - File diff loading for staged and worktree changes.
 - File-level stage and unstage.
+- Hunk-level stage and unstage for supported text diffs.
 - Commit composer with summary, optional body, amend toggle, and staged-change validation.
 - Commit, fetch, pull, and push through the system `git`.
 - Local and remote branch list.
@@ -46,7 +47,6 @@ Implemented on `main`:
 
 Not implemented yet:
 
-- Hunk-level staging.
 - Full PR/MR review and inline commenting.
 
 See [docs/roadmap.md](docs/roadmap.md) for the active roadmap.
@@ -140,6 +140,6 @@ docs/
 
 ## Next Milestone
 
-The next milestone is focused staging:
+The next milestone is branch graph depth:
 
-- Add hunk-level staging for supported text diffs.
+- Add a more readable branch graph with stronger filtering for daily history review.

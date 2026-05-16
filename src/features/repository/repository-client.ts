@@ -36,6 +36,10 @@ type FileOperationArgs = RepositoryPathArgs & {
   filePath: string;
 };
 
+type HunkOperationArgs = RepositoryPathArgs & {
+  patch: string;
+};
+
 type CommitArgs = RepositoryPathArgs & {
   summary: string;
   body: string;
@@ -88,6 +92,8 @@ export type RepositoryClient = {
   getFileDiff(args: FileDiffArgs): Promise<FileDiff>;
   stageFile(args: FileOperationArgs): Promise<GitOperationResult>;
   unstageFile(args: FileOperationArgs): Promise<GitOperationResult>;
+  stageHunk(args: HunkOperationArgs): Promise<GitOperationResult>;
+  unstageHunk(args: HunkOperationArgs): Promise<GitOperationResult>;
   commitChanges(args: CommitArgs): Promise<GitOperationResult>;
   fetchRepository(args: QueuedRepositoryPathArgs): Promise<GitOperationResult>;
   pullRepository(args: QueuedRepositoryPathArgs): Promise<GitOperationResult>;
@@ -218,8 +224,14 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
     stageFile(args) {
       return invokeCommand<GitOperationResult>("stage_file", args);
     },
+    stageHunk(args) {
+      return invokeCommand<GitOperationResult>("stage_hunk", args);
+    },
     unstageFile(args) {
       return invokeCommand<GitOperationResult>("unstage_file", args);
+    },
+    unstageHunk(args) {
+      return invokeCommand<GitOperationResult>("unstage_hunk", args);
     }
   };
 }
@@ -445,8 +457,14 @@ export function getBrowserRepositoryClient(): RepositoryClient {
     stageFile(args) {
       return Promise.resolve(browserMutationResult(`git add -- ${args.filePath}`));
     },
+    stageHunk() {
+      return Promise.resolve(browserMutationResult("git apply --cached"));
+    },
     unstageFile(args) {
       return Promise.resolve(browserMutationResult(`git restore --staged -- ${args.filePath}`));
+    },
+    unstageHunk() {
+      return Promise.resolve(browserMutationResult("git apply --cached --reverse"));
     }
   };
 }
@@ -495,6 +513,14 @@ export function stageFile(args: FileOperationArgs): Promise<GitOperationResult> 
 
 export function unstageFile(args: FileOperationArgs): Promise<GitOperationResult> {
   return repositoryClient.unstageFile(args);
+}
+
+export function stageHunk(args: HunkOperationArgs): Promise<GitOperationResult> {
+  return repositoryClient.stageHunk(args);
+}
+
+export function unstageHunk(args: HunkOperationArgs): Promise<GitOperationResult> {
+  return repositoryClient.unstageHunk(args);
 }
 
 export function commitChanges(args: CommitArgs): Promise<GitOperationResult> {

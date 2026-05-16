@@ -1,4 +1,8 @@
-use std::{path::Path, process::Command};
+use std::{
+    io::Write,
+    path::Path,
+    process::{Command, Stdio},
+};
 
 use serde::Serialize;
 
@@ -24,6 +28,62 @@ pub fn run_git(
         .map_err(|error| {
             OperationError::command("failed to run git", command.clone(), error.to_string())
         })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+
+    if !output.status.success() {
+        return Err(OperationError::command(
+            "git command failed",
+            command,
+            stderr,
+        ));
+    }
+
+    Ok(GitOperationResult {
+        command,
+        stdout,
+        stderr,
+    })
+}
+
+pub fn run_git_with_stdin(
+    repository_path: &Path,
+    args: &[String],
+    stdin: &str,
+) -> Result<GitOperationResult, OperationError> {
+    let command = command_text(args);
+    let mut child = Command::new("git")
+        .args(args)
+        .current_dir(repository_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| {
+            OperationError::command("failed to run git", command.clone(), error.to_string())
+        })?;
+
+    let Some(mut child_stdin) = child.stdin.take() else {
+        return Err(OperationError::command(
+            "failed to open git stdin",
+            command,
+            String::new(),
+        ));
+    };
+
+    child_stdin.write_all(stdin.as_bytes()).map_err(|error| {
+        OperationError::command(
+            "failed to write git stdin",
+            command.clone(),
+            error.to_string(),
+        )
+    })?;
+    drop(child_stdin);
+
+    let output = child.wait_with_output().map_err(|error| {
+        OperationError::command("failed to run git", command.clone(), error.to_string())
+    })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();

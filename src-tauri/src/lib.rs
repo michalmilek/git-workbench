@@ -59,6 +59,16 @@ fn unstage_file(
 }
 
 #[tauri::command]
+fn stage_hunk(repository_path: &str, patch: &str) -> Result<GitOperationResult, OperationError> {
+    git::operations::stage_hunk(std::path::Path::new(repository_path), patch)
+}
+
+#[tauri::command]
+fn unstage_hunk(repository_path: &str, patch: &str) -> Result<GitOperationResult, OperationError> {
+    git::operations::unstage_hunk(std::path::Path::new(repository_path), patch)
+}
+
+#[tauri::command]
 fn commit_changes(
     repository_path: &str,
     summary: &str,
@@ -301,6 +311,8 @@ pub fn run() -> tauri::Result<()> {
             get_file_diff,
             stage_file,
             unstage_file,
+            stage_hunk,
+            unstage_hunk,
             commit_changes,
             fetch_repository,
             pull_repository,
