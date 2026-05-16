@@ -32,6 +32,7 @@ The repository already includes:
 - Provider API connection testing for configured accounts.
 - Provider PR/MR work item list for the active repository.
 - Provider CI/check/pipeline status for listed PRs and MRs.
+- Provider-neutral PR/MR detail surface for GitHub, GitLab.com, and self-hosted GitLab work items.
 - External PR/MR and CI/pipeline links through the system opener.
 - Merge and rebase previews with source/target branch, planned command, commits, changed files, and likely conflict files.
 - Pull and push previews with incoming/outgoing commits and changed files.
@@ -76,6 +77,7 @@ These items are already implemented on `main`:
 - Provider API connection testing for configured accounts.
 - Provider PR/MR work item list for the active repository.
 - Provider CI/check/pipeline status for listed PRs and MRs.
+- Provider-neutral PR/MR detail surface for GitHub, GitLab.com, and self-hosted GitLab work items.
 - External PR/MR and CI/pipeline links through the system opener.
 - Merge and rebase previews with source/target branch, planned command, commits, changed files, and likely conflict files.
 - Pull and push previews with incoming/outgoing commits and changed files.
@@ -108,7 +110,7 @@ Goal: turn the current shell into the first useful desktop Git client.
 - Done: show operation result/error details and command output for each Git action.
 - Done: live progress logs for long-running Git operations.
 
-Recommended next milestone: add provider-neutral PR/MR views.
+Recommended next milestone: add batch repository operations.
 
 ## P1: Daily Branch Workflows
 
@@ -139,6 +141,7 @@ Goal: make GitHub, GitLab.com, and company GitLab instances first-class without 
 - Done: test provider API connections.
 - Done: show PR/MR lists for the active repository.
 - Done: show CI/check/pipeline status.
+- Done: show provider-neutral PR/MR details for the active repository.
 - Done: open PR/MR and pipeline links externally.
 - Keep push and pull using the user's existing system Git, SSH agent, credential helper, and VPN setup.
 
@@ -167,8 +170,8 @@ Goal: build the features that make the app clearly better than a standard Git GU
 - Done: add smart commit grouping for related changes.
 - Done: add a multi-repository workspace.
 - Done: add a repository health panel with dirty state, ahead/behind counts, CI status, open PR/MR state, and last refresh time.
-- Next: add provider-neutral PR/MR views across GitHub and GitLab.
-- Add batch operations: fetch all, pull selected, push selected.
+- Done: add provider-neutral PR/MR views across GitHub and GitLab.
+- Next: add batch operations: fetch all, pull selected, push selected.
 - Add profiles for company GitLab, VPN, and SSH setups.
 - Add keyboard-first navigation for repeated workflows.
 
@@ -218,4 +221,5 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 19. Done: smart commit grouping.
 20. Done: multi-repository workspace.
 21. Done: repository health panel.
-22. Next: provider-neutral PR/MR views.
+22. Done: provider-neutral PR/MR views.
+23. Next: batch repository operations.

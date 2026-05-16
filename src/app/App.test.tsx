@@ -11,6 +11,7 @@ import type {
   FileDiff,
   ProviderAccount,
   ProviderRemoteList,
+  ProviderWorkItem,
   ProviderWorkItemList,
   RepositoryStatus,
   StashEntry
@@ -83,6 +84,44 @@ describe("App repository health", () => {
     await clickButton(container, "Refresh");
     expect(repositoryHealthText(container)).toContain("Last refreshJust now");
     expect(repositoryHealthText(container)).not.toContain("Last refreshNever refreshed");
+  });
+
+  test("renders provider-neutral work item details and updates selection", async () => {
+    repositoryMocks.listProviderWorkItems.mockResolvedValue({
+      items: [
+        providerWorkItem({ id: "github:origin:42", title: "Add provider work panel" }),
+        providerWorkItem({
+          author: "sam-chen",
+          checkStatus: "failed",
+          ciUrl: "https://gitlab.company.test/platform/workbench/-/pipelines/20260516",
+          id: "gitlab:company:17",
+          providerBaseUrl: "https://gitlab.company.test",
+          providerKind: "customGitlab",
+          remoteName: "company",
+          sourceBranch: "fix/provider-refresh",
+          state: "opened",
+          targetBranch: "main",
+          title: "Refresh provider work after account changes",
+          webUrl: "https://gitlab.company.test/platform/workbench/-/merge_requests/17"
+        })
+      ],
+      message: "Loaded 2 provider work item(s)."
+    });
+
+    await openRepository(container, "/repo");
+
+    expect(providerWorkItemDetailsText(container)).toContain("Add provider work panel");
+    expect(providerWorkItemDetailsText(container)).toContain("Pull request");
+    expect(providerWorkItemDetailsText(container)).toContain("GitHub");
+    expect(providerWorkItemDetailsText(container)).toContain("Running");
+
+    await clickButton(container, "Refresh provider work after account changes");
+
+    expect(providerWorkItemDetailsText(container)).toContain("Refresh provider work after account changes");
+    expect(providerWorkItemDetailsText(container)).toContain("Merge request");
+    expect(providerWorkItemDetailsText(container)).toContain("Custom GitLab");
+    expect(providerWorkItemDetailsText(container)).toContain("fix/provider-refresh -> main");
+    expect(providerWorkItemDetailsText(container)).toContain("Failed");
   });
 });
 
@@ -168,6 +207,10 @@ function repositoryHealthText(container: HTMLElement): string {
   return requiredElement(container.querySelector("[data-testid='repository-health-panel']")).textContent ?? "";
 }
 
+function providerWorkItemDetailsText(container: HTMLElement): string {
+  return requiredElement(container.querySelector("[data-testid='provider-work-item-details-panel']")).textContent ?? "";
+}
+
 function requiredElement<T extends Element>(element: T | null): T {
   if (element === null) {
     throw new Error("Expected test element to exist.");
@@ -194,5 +237,24 @@ function noConflictState(): ConflictState {
     files: [],
     message: "No merge or rebase in progress.",
     operation: "none"
+  };
+}
+
+function providerWorkItem(overrides: Partial<ProviderWorkItem> = {}): ProviderWorkItem {
+  return {
+    accountId: "account-1",
+    author: "alex-rivera",
+    checkStatus: "running",
+    ciUrl: "https://github.com/openai/codex/actions/runs/1516",
+    id: "github:origin:42",
+    providerBaseUrl: "https://github.com",
+    providerKind: "github",
+    remoteName: "origin",
+    sourceBranch: "feature/provider-work-panel",
+    state: "open",
+    targetBranch: "main",
+    title: "Add provider work panel",
+    webUrl: "https://github.com/openai/codex/pull/42",
+    ...overrides
   };
 }

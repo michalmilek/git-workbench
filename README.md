@@ -42,6 +42,7 @@ Implemented on `main`:
 - Provider API connection testing for configured accounts.
 - Provider PR/MR work item list for the active repository.
 - Provider CI/check/pipeline status for listed PRs and MRs.
+- Provider-neutral PR/MR detail surface for GitHub, GitLab.com, and self-hosted GitLab work items.
 - External PR/MR and CI/pipeline links through the system opener.
 - Smart commit grouping suggestions with conventional summaries, commit bodies, counts, and group staging.
 - Latest operation result/error panel with command, stdout, and stderr.
@@ -143,6 +144,6 @@ docs/
 
 ## Next Milestone
 
-The next milestone is provider-neutral PR/MR views:
+The next milestone is batch repository operations:
 
-- Show richer GitHub/GitLab work item details in one common review surface.
+- Fetch all, pull selected, and push selected repositories from the multi-repository workspace.
