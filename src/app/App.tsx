@@ -36,9 +36,12 @@ import {
 import { isCommitSummaryValid } from "@/features/repository/commit-validation";
 import { trustedProviderUrl } from "@/features/repository/provider-links";
 import {
+  abortMerge,
+  abortRebase,
   applyStash,
   checkoutBranch,
   commitChanges,
+  continueRebase,
   createBranch,
   createStash,
   deleteBranch,
@@ -46,6 +49,7 @@ import {
   dropStash,
   fetchRepository,
   getCommitDetails,
+  getConflictState,
   getFileDiff,
   getRepositoryStatus,
   listProviderAccounts,
@@ -59,6 +63,8 @@ import {
   previewRebase,
   pullRepository,
   pushRepository,
+  runMerge,
+  runRebase,
   saveProviderAccount,
   stageFile,
   testProviderConnection,
@@ -82,6 +88,7 @@ import type {
   CommitChangedFile,
   CommitDetails,
   CommitSummary,
+  ConflictState,
   DiffMode,
   FileDiff,
   GitOperationResult,
@@ -122,6 +129,8 @@ type OperationFeedback =
 type SyncAction = "fetch" | "pull" | "push";
 type BranchAction = "checkout-branch" | "create-branch" | "delete-branch" | "preview-merge" | "preview-rebase";
 type StashAction = "create-stash" | "apply-stash" | "pop-stash" | "drop-stash";
+type OperationExecutionAction = "run-merge" | "run-rebase" | "abort-merge" | "abort-rebase" | "continue-rebase";
+type ConflictRecoveryAction = Exclude<OperationExecutionAction, "run-merge" | "run-rebase">;
 type ProviderAccountAction = "save-account" | "delete-account" | "test-account" | null;
 type BusyAction =
   | "status"
@@ -132,6 +141,7 @@ type BusyAction =
   | SyncAction
   | BranchAction
   | StashAction
+  | OperationExecutionAction
   | null;
 
 const providerKindLabels: Record<ProviderKind, string> = {
@@ -185,6 +195,7 @@ export function App() {
   const [branchNameInput, setBranchNameInput] = useState("");
   const [operationBranch, setOperationBranch] = useState("");
   const [operationPreview, setOperationPreview] = useState<OperationPreview | null>(null);
+  const [conflictState, setConflictState] = useState<ConflictState | null>(null);
   const [stashes, setStashes] = useState<StashEntry[]>([]);
   const [stashMessage, setStashMessage] = useState("");
   const [selectedStashRef, setSelectedStashRef] = useState<string | null>(null);
@@ -282,10 +293,13 @@ export function App() {
     const requestedCommitOid = path === repositoryPath ? selectedCommitOid : null;
     const switchingRepository = path !== repositoryPath;
     const referenceRequest = createReferenceRequest();
+    if (switchingRepository) {
+      setConflictState(null);
+    }
     setBusyAction("status");
 
     try {
-      const nextStatus = await getRepositoryStatus(path);
+      const [nextStatus, nextConflictState] = await Promise.all([getRepositoryStatus(path), getConflictState(path)]);
       if (!isCurrentRepositoryLoadRequest(repositoryLoadRequest)) {
         return;
       }
@@ -302,6 +316,7 @@ export function App() {
       }
       setRepositoryPath(path);
       setStatus(nextStatus);
+      setConflictState(nextConflictState);
       setSelectedFilePath(nextFile?.path ?? null);
       setDiffMode(nextDiffMode);
       setDiff(null);
@@ -328,6 +343,7 @@ export function App() {
       const operationError = describeOperationError(error);
       setFeedback({ kind: "error", error: operationError });
       recordOperationError("Refresh repository", operationError);
+      setConflictState(null);
       if (!switchingRepository) {
         setDiff(null);
         setBranches([]);
@@ -752,6 +768,58 @@ export function App() {
       if (isCurrentOperationPreviewRequest(requestId)) {
         setBusyAction(null);
       }
+    }
+  }
+
+  async function runPreviewedOperation(preview: OperationPreview) {
+    if (repositoryPath === null) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Run ${preview.command}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    const action = preview.kind === "merge" ? "run-merge" : "run-rebase";
+    const operation = preview.kind === "merge" ? "Run merge" : "Run rebase";
+    invalidateDiffRequests();
+    setBusyAction(action);
+
+    try {
+      const result =
+        preview.kind === "merge"
+          ? await runMerge({ repositoryPath, sourceBranch: preview.sourceBranch })
+          : await runRebase({ repositoryPath, targetBranch: preview.targetBranch });
+      setFeedback({ kind: "result", result });
+      recordOperationResult(operation, result);
+    } catch (error) {
+      const operationError = describeOperationError(error);
+      setFeedback({ kind: "error", error: operationError });
+      recordOperationError(operation, operationError);
+    } finally {
+      await loadRepositoryStatus(repositoryPath, selectedFilePath);
+    }
+  }
+
+  async function runConflictRecovery(action: ConflictRecoveryAction) {
+    if (repositoryPath === null) {
+      return;
+    }
+
+    invalidateDiffRequests();
+    setBusyAction(action);
+
+    try {
+      const result = await runConflictRecoveryCommand(action, repositoryPath);
+      setFeedback({ kind: "result", result });
+      recordOperationResult(conflictRecoveryLabel(action), result);
+    } catch (error) {
+      const operationError = describeOperationError(error);
+      setFeedback({ kind: "error", error: operationError });
+      recordOperationError(conflictRecoveryLabel(action), operationError);
+    } finally {
+      await loadRepositoryStatus(repositoryPath, selectedFilePath);
     }
   }
 
@@ -1272,7 +1340,8 @@ export function App() {
               ) : (
                 recentRepositories.map((recentPath) => (
                   <button
-                    className="truncate rounded-sm px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                    className="truncate rounded-sm px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={busyAction !== null}
                     key={recentPath}
                     onClick={() => {
                       setRepositoryPathInput(recentPath);
@@ -1711,7 +1780,19 @@ export function App() {
             </div>
           </div>
 
-          <OperationPreviewPanel preview={operationPreview} repositoryOpened={repositoryPath !== null} />
+          <OperationPreviewPanel
+            busyAction={busyAction}
+            onRunPreviewedOperation={(preview) => void runPreviewedOperation(preview)}
+            preview={operationPreview}
+            repositoryOpened={repositoryPath !== null}
+          />
+
+          <ConflictStatePanel
+            busyAction={busyAction}
+            conflictState={conflictState}
+            onRecovery={(action) => void runConflictRecovery(action)}
+            repositoryOpened={repositoryPath !== null}
+          />
 
           <ProviderRemotesPanel loading={providerLoading} remotes={providerRemotes} repositoryOpened={repositoryPath !== null} />
 
@@ -2004,6 +2085,21 @@ async function runStashCommand(
   return dropStash({ repositoryPath, stashRef });
 }
 
+async function runConflictRecoveryCommand(
+  action: ConflictRecoveryAction,
+  repositoryPath: string
+): Promise<GitOperationResult> {
+  if (action === "abort-merge") {
+    return abortMerge({ repositoryPath });
+  }
+
+  if (action === "abort-rebase") {
+    return abortRebase({ repositoryPath });
+  }
+
+  return continueRebase({ repositoryPath });
+}
+
 function syncOperationLabel(action: SyncAction): string {
   if (action === "fetch") {
     return "Fetch";
@@ -2026,6 +2122,30 @@ function stashOperationLabel(action: Exclude<StashAction, "create-stash">): stri
   }
 
   return "Drop stash";
+}
+
+function conflictRecoveryLabel(action: ConflictRecoveryAction): string {
+  if (action === "abort-merge") {
+    return "Abort merge";
+  }
+
+  if (action === "abort-rebase") {
+    return "Abort rebase";
+  }
+
+  return "Continue rebase";
+}
+
+function conflictOperationLabel(operation: ConflictState["operation"]): string {
+  if (operation === "merge") {
+    return "merge";
+  }
+
+  if (operation === "rebase") {
+    return "rebase";
+  }
+
+  return "none";
 }
 
 function renderDiffText(diff: FileDiff | null, busyAction: BusyAction): string {
@@ -2112,7 +2232,17 @@ function BranchOperationControls({
   );
 }
 
-function OperationPreviewPanel({ preview, repositoryOpened }: { preview: OperationPreview | null; repositoryOpened: boolean }) {
+function OperationPreviewPanel({
+  busyAction,
+  onRunPreviewedOperation,
+  preview,
+  repositoryOpened
+}: {
+  busyAction: BusyAction;
+  onRunPreviewedOperation(preview: OperationPreview): void;
+  preview: OperationPreview | null;
+  repositoryOpened: boolean;
+}) {
   return (
     <div className="mt-4 flex flex-col gap-3 rounded-md border bg-background p-3 text-sm" data-testid="operation-preview-panel">
       <div className="flex items-center justify-between gap-2">
@@ -2140,9 +2270,121 @@ function OperationPreviewPanel({ preview, repositoryOpened }: { preview: Operati
 
           <p className="text-xs text-muted-foreground">{preview.message}</p>
 
+          <Button
+            disabled={busyAction !== null}
+            onClick={() => {
+              onRunPreviewedOperation(preview);
+            }}
+            size="sm"
+            type="button"
+            variant="default"
+          >
+            {preview.kind === "merge" ? (
+              <IconGitMerge aria-hidden="true" data-icon="inline-start" />
+            ) : (
+              <IconGitCompare aria-hidden="true" data-icon="inline-start" />
+            )}
+            {busyAction === "run-merge" || busyAction === "run-rebase" ? `Running ${preview.kind}` : `Run ${preview.kind}`}
+          </Button>
+
           <PreviewList label="Commits" values={preview.commits.map((commit) => `${commit.shortOid} ${commit.subject}`)} />
           <PreviewList label="Changed files" values={preview.changedFiles} />
           <PreviewList label="Likely conflicts" values={preview.likelyConflictFiles} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConflictStatePanel({
+  busyAction,
+  conflictState,
+  onRecovery,
+  repositoryOpened
+}: {
+  busyAction: BusyAction;
+  conflictState: ConflictState | null;
+  onRecovery(action: ConflictRecoveryAction): void;
+  repositoryOpened: boolean;
+}) {
+  const operation = conflictState === null ? "unknown" : conflictOperationLabel(conflictState.operation);
+  const conflictFileCount = conflictState?.files.length ?? 0;
+
+  return (
+    <div className="mt-4 flex flex-col gap-3 rounded-md border bg-background p-3 text-sm" data-testid="conflict-state-panel">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 font-medium">
+          <IconGitMerge aria-hidden="true" className="size-4 shrink-0" />
+          Conflicts
+        </div>
+        <Badge variant={conflictState === null || conflictState.operation === "none" ? "outline" : "destructive"}>{operation}</Badge>
+      </div>
+
+      {!repositoryOpened ? (
+        <p className="text-sm text-muted-foreground">No repository</p>
+      ) : conflictState === null ? (
+        <p className="text-sm text-muted-foreground">Conflict state not loaded.</p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-[96px_minmax(0,1fr)] gap-x-2 gap-y-1 text-xs">
+            <span className="text-muted-foreground">Operation</span>
+            <span className="truncate">{conflictOperationLabel(conflictState.operation)}</span>
+            <span className="text-muted-foreground">Files</span>
+            <span>{conflictFileCount}</span>
+          </div>
+
+          <p className="text-xs text-muted-foreground">{conflictState.message}</p>
+
+          {conflictState.files.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No conflict files.</p>
+          ) : (
+            <div className="max-h-36 overflow-auto rounded-md border bg-muted/30 p-2 text-xs">
+              {conflictState.files.map((file) => (
+                <div className="border-b py-1.5 last:border-b-0" key={file.path}>
+                  <p className="truncate font-medium">{file.path}</p>
+                  <p className="text-muted-foreground">
+                    {file.indexStatus} / {file.worktreeStatus}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-2">
+            <Button
+              disabled={busyAction !== null || !conflictState.canAbortMerge}
+              onClick={() => {
+                onRecovery("abort-merge");
+              }}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Abort merge
+            </Button>
+            <Button
+              disabled={busyAction !== null || !conflictState.canAbortRebase}
+              onClick={() => {
+                onRecovery("abort-rebase");
+              }}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Abort rebase
+            </Button>
+            <Button
+              disabled={busyAction !== null || !conflictState.canContinueRebase}
+              onClick={() => {
+                onRecovery("continue-rebase");
+              }}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Continue rebase
+            </Button>
+          </div>
         </div>
       )}
     </div>

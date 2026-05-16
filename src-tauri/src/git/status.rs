@@ -18,6 +18,7 @@ pub struct StatusFile {
     pub path: String,
     pub index_status: GitFileStatus,
     pub worktree_status: GitFileStatus,
+    pub conflict: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -176,6 +177,7 @@ fn parse_file_line(line: &str) -> Result<Option<StatusFile>, OperationError> {
             path: path.to_owned(),
             index_status: GitFileStatus::Untracked,
             worktree_status: GitFileStatus::Untracked,
+            conflict: false,
         }));
     }
 
@@ -184,6 +186,7 @@ fn parse_file_line(line: &str) -> Result<Option<StatusFile>, OperationError> {
             path: path.to_owned(),
             index_status: GitFileStatus::Ignored,
             worktree_status: GitFileStatus::Ignored,
+            conflict: false,
         }));
     }
 
@@ -203,6 +206,7 @@ fn parse_file_record(record: &str) -> Result<Option<StatusFile>, OperationError>
             path: path.to_owned(),
             index_status: GitFileStatus::Untracked,
             worktree_status: GitFileStatus::Untracked,
+            conflict: false,
         }));
     }
 
@@ -214,6 +218,7 @@ fn parse_file_record(record: &str) -> Result<Option<StatusFile>, OperationError>
             path: path.to_owned(),
             index_status: GitFileStatus::Ignored,
             worktree_status: GitFileStatus::Ignored,
+            conflict: false,
         }));
     }
 
@@ -231,6 +236,7 @@ fn parse_file_record(record: &str) -> Result<Option<StatusFile>, OperationError>
         path: path.to_owned(),
         index_status,
         worktree_status,
+        conflict: record_kind == 'u',
     }))
 }
 
@@ -297,16 +303,19 @@ mod tests {
                         path: "src/App.tsx".to_owned(),
                         index_status: GitFileStatus::Unmodified,
                         worktree_status: GitFileStatus::Modified,
+                        conflict: false,
                     },
                     StatusFile {
                         path: "src/new.ts".to_owned(),
                         index_status: GitFileStatus::Added,
                         worktree_status: GitFileStatus::Unmodified,
+                        conflict: false,
                     },
                     StatusFile {
                         path: "scratch.txt".to_owned(),
                         index_status: GitFileStatus::Untracked,
                         worktree_status: GitFileStatus::Untracked,
+                        conflict: false,
                     },
                 ],
             }
@@ -341,21 +350,25 @@ u UU N... 100644 100644 100644 100644 1111111111111111111111111111111111111111 2
                         path: "docs/file with spaces.md".to_owned(),
                         index_status: GitFileStatus::Unmodified,
                         worktree_status: GitFileStatus::Modified,
+                        conflict: false,
                     },
                     StatusFile {
                         path: "src/new name.ts".to_owned(),
                         index_status: GitFileStatus::Renamed,
                         worktree_status: GitFileStatus::Unmodified,
+                        conflict: false,
                     },
                     StatusFile {
                         path: "src/conflict.ts".to_owned(),
                         index_status: GitFileStatus::Unmerged,
                         worktree_status: GitFileStatus::Unmerged,
+                        conflict: true,
                     },
                     StatusFile {
                         path: "scratch file.txt".to_owned(),
                         index_status: GitFileStatus::Untracked,
                         worktree_status: GitFileStatus::Untracked,
+                        conflict: false,
                     },
                 ],
             }

@@ -4,6 +4,7 @@ import type {
   BranchList,
   CommitDetails,
   CommitSummary,
+  ConflictState,
   FileDiff,
   GitOperationResult,
   OperationPreview,
@@ -69,6 +70,7 @@ type InvokeCommand = <T>(command: string, args: Record<string, unknown>) => Prom
 
 export type RepositoryClient = {
   getRepositoryStatus(repositoryPath: string): Promise<RepositoryStatus>;
+  getConflictState(repositoryPath: string): Promise<ConflictState>;
   listProviderRemotes(repositoryPath: string): Promise<ProviderRemoteList>;
   listProviderWorkItems(repositoryPath: string): Promise<ProviderWorkItemList>;
   listProviderAccounts(): Promise<ProviderAccount[]>;
@@ -95,6 +97,11 @@ export type RepositoryClient = {
   getCommitDetails(args: CommitDetailsArgs): Promise<CommitDetails>;
   previewMerge(args: PreviewMergeArgs): Promise<OperationPreview>;
   previewRebase(args: PreviewRebaseArgs): Promise<OperationPreview>;
+  runMerge(args: PreviewMergeArgs): Promise<GitOperationResult>;
+  runRebase(args: PreviewRebaseArgs): Promise<GitOperationResult>;
+  abortMerge(args: RepositoryPathArgs): Promise<GitOperationResult>;
+  abortRebase(args: RepositoryPathArgs): Promise<GitOperationResult>;
+  continueRebase(args: RepositoryPathArgs): Promise<GitOperationResult>;
 };
 
 export function createRepositoryClient(invokeCommand: InvokeCommand): RepositoryClient {
@@ -105,8 +112,17 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
     applyStash(args) {
       return invokeCommand<GitOperationResult>("apply_stash", args);
     },
+    abortMerge(args) {
+      return invokeCommand<GitOperationResult>("abort_merge", args);
+    },
+    abortRebase(args) {
+      return invokeCommand<GitOperationResult>("abort_rebase", args);
+    },
     checkoutBranch(args) {
       return invokeCommand<GitOperationResult>("checkout_branch", args);
+    },
+    continueRebase(args) {
+      return invokeCommand<GitOperationResult>("continue_rebase", args);
     },
     createBranch(args) {
       return invokeCommand<GitOperationResult>("create_branch", args);
@@ -137,6 +153,9 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
     },
     getRepositoryStatus(repositoryPath) {
       return invokeCommand<RepositoryStatus>("get_repository_status", { repositoryPath });
+    },
+    getConflictState(repositoryPath) {
+      return invokeCommand<ConflictState>("get_conflict_state", { repositoryPath });
     },
     listProviderRemotes(repositoryPath) {
       return invokeCommand<ProviderRemoteList>("list_provider_remotes", { repositoryPath });
@@ -174,6 +193,12 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
     pushRepository(args) {
       return invokeCommand<GitOperationResult>("push_repository", args);
     },
+    runMerge(args) {
+      return invokeCommand<GitOperationResult>("run_merge", args);
+    },
+    runRebase(args) {
+      return invokeCommand<GitOperationResult>("run_rebase", args);
+    },
     stageFile(args) {
       return invokeCommand<GitOperationResult>("stage_file", args);
     },
@@ -185,6 +210,12 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
 
 export function getBrowserRepositoryClient(): RepositoryClient {
   return {
+    abortMerge() {
+      return Promise.resolve(browserMutationResult("git merge --abort"));
+    },
+    abortRebase() {
+      return Promise.resolve(browserMutationResult("git rebase --abort"));
+    },
     applyStash(args) {
       return Promise.resolve(browserMutationResult(`git stash apply ${args.stashRef}`));
     },
@@ -193,6 +224,9 @@ export function getBrowserRepositoryClient(): RepositoryClient {
     },
     commitChanges(args) {
       return Promise.resolve(browserMutationResult(`git commit -m ${args.summary}`));
+    },
+    continueRebase() {
+      return Promise.resolve(browserMutationResult("git rebase --continue"));
     },
     createBranch(args) {
       return Promise.resolve(browserMutationResult(`git branch ${args.branchName}`));
@@ -229,6 +263,16 @@ export function getBrowserRepositoryClient(): RepositoryClient {
         browserCommitDetails.find((commitDetails) => commitDetails.commit.oid === args.commitOid) ?? browserCommitDetails[0];
       return Promise.resolve(details);
     },
+    getConflictState() {
+      return Promise.resolve({
+        canAbortMerge: false,
+        canAbortRebase: false,
+        canContinueRebase: false,
+        files: [],
+        message: "Browser preview has no merge or rebase conflicts.",
+        operation: "none"
+      });
+    },
     previewMerge(args) {
       return Promise.resolve(
         browserOperationPreview({
@@ -257,9 +301,9 @@ export function getBrowserRepositoryClient(): RepositoryClient {
         behind: 0,
         branch: "browser-preview",
         files: [
-          { indexStatus: "modified", path: "src/app/App.tsx", worktreeStatus: "modified" },
-          { indexStatus: "added", path: "src/features/repository/repository-client.ts", worktreeStatus: "unmodified" },
-          { indexStatus: "untracked", path: "scratch file.txt", worktreeStatus: "untracked" }
+          { conflict: false, indexStatus: "modified", path: "src/app/App.tsx", worktreeStatus: "modified" },
+          { conflict: false, indexStatus: "added", path: "src/features/repository/repository-client.ts", worktreeStatus: "unmodified" },
+          { conflict: false, indexStatus: "untracked", path: "scratch file.txt", worktreeStatus: "untracked" }
         ],
         upstream: repositoryPath
       });
@@ -353,6 +397,12 @@ export function getBrowserRepositoryClient(): RepositoryClient {
     pushRepository() {
       return Promise.resolve(browserMutationResult("git push"));
     },
+    runMerge(args) {
+      return Promise.resolve(browserMutationResult(`git merge ${args.sourceBranch}`));
+    },
+    runRebase(args) {
+      return Promise.resolve(browserMutationResult(`git rebase ${args.targetBranch}`));
+    },
     stageFile(args) {
       return Promise.resolve(browserMutationResult(`git add -- ${args.filePath}`));
     },
@@ -366,6 +416,10 @@ const repositoryClient = hasTauriRuntime() ? createRepositoryClient(invoke) : ge
 
 export function getRepositoryStatus(repositoryPath: string): Promise<RepositoryStatus> {
   return repositoryClient.getRepositoryStatus(repositoryPath);
+}
+
+export function getConflictState(repositoryPath: string): Promise<ConflictState> {
+  return repositoryClient.getConflictState(repositoryPath);
 }
 
 export function listProviderRemotes(repositoryPath: string): Promise<ProviderRemoteList> {
@@ -454,6 +508,26 @@ export function previewMerge(args: PreviewMergeArgs): Promise<OperationPreview> 
 
 export function previewRebase(args: PreviewRebaseArgs): Promise<OperationPreview> {
   return repositoryClient.previewRebase(args);
+}
+
+export function runMerge(args: PreviewMergeArgs): Promise<GitOperationResult> {
+  return repositoryClient.runMerge(args);
+}
+
+export function runRebase(args: PreviewRebaseArgs): Promise<GitOperationResult> {
+  return repositoryClient.runRebase(args);
+}
+
+export function abortMerge(args: RepositoryPathArgs): Promise<GitOperationResult> {
+  return repositoryClient.abortMerge(args);
+}
+
+export function abortRebase(args: RepositoryPathArgs): Promise<GitOperationResult> {
+  return repositoryClient.abortRebase(args);
+}
+
+export function continueRebase(args: RepositoryPathArgs): Promise<GitOperationResult> {
+  return repositoryClient.continueRebase(args);
 }
 
 export function createStash(args: CreateStashArgs): Promise<GitOperationResult> {

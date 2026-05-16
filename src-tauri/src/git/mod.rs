@@ -1,6 +1,7 @@
 mod command;
 
 pub mod branch;
+pub mod conflict;
 pub mod history;
 pub mod operation_preview;
 pub mod operations;
