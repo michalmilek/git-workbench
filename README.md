@@ -26,9 +26,9 @@ Implemented on `main`:
 - Local branch checkout, remote branch checkout as a local tracking branch, branch creation, and non-current local branch deletion.
 - Stash list, create, apply, pop, and drop.
 - Commit history across local and remote refs.
-- Compact branch graph rail in the history view.
+- Lane-based branch graph in the history view.
 - Commit details with body, changed files, and patch text.
-- History filtering by subject, author, oid, and refs.
+- History filtering with plain tokens and scoped `author:`, `ref:`, `branch:`, `hash:`, `oid:`, `subject:`, and `merge:` filters.
 - Merge and rebase previews with source/target branch, planned command, commits, changed files, and likely conflict files.
 - Pull and push previews with incoming/outgoing commits and changed files.
 - Merge and rebase execution after explicit preview confirmation.
@@ -140,6 +140,6 @@ docs/
 
 ## Next Milestone
 
-The next milestone is branch graph depth:
+The next milestone is commit grouping:
 
-- Add a more readable branch graph with stronger filtering for daily history review.
+- Add smart commit grouping for related changes.

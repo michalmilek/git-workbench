@@ -483,6 +483,29 @@ describe("browser repository client", () => {
     });
     await expect(client.listProviderAccounts()).resolves.not.toContainEqual(savedAccount);
   });
+
+  test("filters browser commit history with scoped history query prefixes", async () => {
+    const client = getBrowserRepositoryClient();
+
+    await expect(client.listCommitHistory({ query: "author:Sam", repositoryPath: "/repo" })).resolves.toMatchObject([
+      {
+        authorName: "Sam Chen",
+        shortOid: "6f5e4d3"
+      }
+    ]);
+    await expect(client.listCommitHistory({ query: "ref:browser-preview", repositoryPath: "/repo" })).resolves.toMatchObject([
+      {
+        authorName: "Alex Rivera",
+        refs: ["HEAD", "browser-preview"]
+      }
+    ]);
+    await expect(client.listCommitHistory({ query: "hash:6f5e4d3", repositoryPath: "/repo" })).resolves.toMatchObject([
+      {
+        oid: "6f5e4d3c2b1a0987654321fedcba9876543210ab",
+        subject: "Wire repository status panel"
+      }
+    ]);
+  });
 });
 
 function responseForCommand(

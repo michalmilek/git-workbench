@@ -98,6 +98,7 @@ fn history_args(query: Option<String>) -> Vec<String> {
         String::from("log"),
         String::from("--exclude=refs/stash"),
         String::from("--all"),
+        String::from("--topo-order"),
         String::from("--date=iso-strict"),
         format!("--max-count={HISTORY_LIMIT}"),
         format!("--pretty=format:{LOG_FORMAT}"),
@@ -440,7 +441,7 @@ mod tests {
     use std::{error::Error, fs, path::Path, process::Command};
 
     use super::{
-        CommitChangedFile, CommitFileChangeType, CommitSummary, get_commit_details,
+        CommitChangedFile, CommitFileChangeType, CommitSummary, get_commit_details, history_args,
         list_commit_history, parse_changed_files_output, parse_commit_metadata_output,
         parse_log_output,
     };
@@ -500,6 +501,13 @@ Body line two
         assert_eq!(body, "Body line one\n\nBody line two\n");
 
         Ok(())
+    }
+
+    #[test]
+    fn history_args_include_topological_ordering() {
+        let args = history_args(None);
+
+        assert!(args.iter().any(|arg| arg == "--topo-order"));
     }
 
     #[test]
@@ -615,6 +623,43 @@ Body line two
                 .diff_text
                 .contains("diff --git a/feature.txt b/feature.txt")
         );
+
+        fs::remove_dir_all(repository_path)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn lists_merge_commit_before_both_parents() -> Result<(), Box<dyn Error>> {
+        let repository_path = create_merge_repository("history-merge-order")?;
+        let merge_oid = git_output(&repository_path, ["rev-parse", "HEAD"])?;
+        let first_parent_oid = git_output(&repository_path, ["rev-parse", "HEAD^1"])?;
+        let second_parent_oid = git_output(&repository_path, ["rev-parse", "HEAD^2"])?;
+
+        let merge_oid = merge_oid.trim();
+        let first_parent_oid = first_parent_oid.trim();
+        let second_parent_oid = second_parent_oid.trim();
+        let commits = list_commit_history(&repository_path, None)?;
+        let merge_position = commits
+            .iter()
+            .position(|commit| commit.oid == merge_oid)
+            .ok_or("missing merge commit")?;
+        let first_parent_position = commits
+            .iter()
+            .position(|commit| commit.oid == first_parent_oid)
+            .ok_or("missing first parent")?;
+        let second_parent_position = commits
+            .iter()
+            .position(|commit| commit.oid == second_parent_oid)
+            .ok_or("missing second parent")?;
+        let merge_commit = &commits[merge_position];
+
+        assert_eq!(
+            merge_commit.parents,
+            vec![first_parent_oid.to_owned(), second_parent_oid.to_owned()]
+        );
+        assert!(merge_position < first_parent_position);
+        assert!(merge_position < second_parent_position);
 
         fs::remove_dir_all(repository_path)?;
 

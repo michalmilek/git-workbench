@@ -35,6 +35,13 @@ import {
   type CommandLogEntry
 } from "@/features/repository/command-log";
 import { isCommitSummaryValid } from "@/features/repository/commit-validation";
+import {
+  buildCommitGraphRows,
+  classifyCommitRef,
+  filterCommitHistory,
+  type CommitGraphLane,
+  type CommitGraphRow
+} from "@/features/repository/commit-history";
 import { buildHunkPatch, parseDiffHunks, type ParsedDiff } from "@/features/repository/diff-hunks";
 import {
   applyOperationEvent,
@@ -148,6 +155,7 @@ type StashAction = "create-stash" | "apply-stash" | "pop-stash" | "drop-stash";
 type OperationExecutionAction = "run-merge" | "run-rebase" | "abort-merge" | "abort-rebase" | "continue-rebase";
 type ConflictRecoveryAction = Exclude<OperationExecutionAction, "run-merge" | "run-rebase">;
 type ProviderAccountAction = "save-account" | "delete-account" | "test-account" | null;
+type CommitRefKind = ReturnType<typeof classifyCommitRef>;
 type BusyAction =
   | "status"
   | "diff"
@@ -175,6 +183,17 @@ const defaultProviderBaseUrls: Record<ProviderAccountKind, string> = {
   github: "https://github.com",
   gitlab: "https://gitlab.com"
 };
+
+const historyFilterHints = ["author:", "ref:", "hash:", "merge:"] as const;
+const commitGraphLaneWidth = 14;
+const commitGraphLaneClasses = [
+  "bg-sky-500",
+  "bg-emerald-500",
+  "bg-amber-500",
+  "bg-rose-500",
+  "bg-violet-500",
+  "bg-cyan-500"
+] as const;
 
 export function App() {
   const [recentRepositories, setRecentRepositories] = useState(readRecentRepositories);
@@ -235,6 +254,7 @@ export function App() {
 
   const summary = useMemo(() => (status === null ? null : summarizeRepositoryStatus(status)), [status]);
   const filteredHistory = useMemo(() => filterCommitHistory(history, historyFilter), [history, historyFilter]);
+  const commitGraphRows = useMemo(() => buildCommitGraphRows(filteredHistory), [filteredHistory]);
   const selectedFile = getSelectedFile(status, selectedFilePath);
   const selectedStash = getSelectedStash(stashes, selectedStashRef);
   const selectedCommit = getSelectedCommit(history, selectedCommitOid);
@@ -1650,30 +1670,46 @@ export function App() {
                     {repositoryPath === null ? "Open a repository" : `${history.length} commits`}
                   </h2>
                 </div>
-                <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:min-w-[340px]">
-                  <label className="sr-only" htmlFor="history-filter">
-                    Filter history
-                  </label>
-                  <input
-                    className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-                    id="history-filter"
-                    onChange={(event) => {
-                      setHistoryFilter(event.target.value);
-                    }}
-                    placeholder="Filter subject, author, oid, refs"
-                    value={historyFilter}
-                  />
-                  <Button
-                    disabled={busyAction !== null || (repositoryPath === null && repositoryPathInput.trim().length === 0)}
-                    onClick={() => {
-                      void refreshRepository();
-                    }}
-                    type="button"
-                    variant="outline"
-                  >
-                    <IconRefresh aria-hidden="true" data-icon="inline-start" />
-                    Refresh
-                  </Button>
+                <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:min-w-[420px]">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <label className="sr-only" htmlFor="history-filter">
+                      Filter history
+                    </label>
+                    <input
+                      className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                      id="history-filter"
+                      onChange={(event) => {
+                        setHistoryFilter(event.target.value);
+                      }}
+                      placeholder="Filter subject, author, hash, refs"
+                      value={historyFilter}
+                    />
+                    <Button
+                      disabled={busyAction !== null || (repositoryPath === null && repositoryPathInput.trim().length === 0)}
+                      onClick={() => {
+                        void refreshRepository();
+                      }}
+                      type="button"
+                      variant="outline"
+                    >
+                      <IconRefresh aria-hidden="true" data-icon="inline-start" />
+                      Refresh
+                    </Button>
+                  </div>
+                  <div className="flex min-w-0 flex-wrap gap-1.5">
+                    {historyFilterHints.map((hint) => (
+                      <button
+                        className="rounded-full border bg-muted/30 px-2 py-0.5 font-mono text-[0.6875rem] text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
+                        key={hint}
+                        onClick={() => {
+                          setHistoryFilter((currentFilter) => addHistoryFilterHint(currentFilter, hint));
+                        }}
+                        type="button"
+                      >
+                        {hint}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -1688,31 +1724,35 @@ export function App() {
                       {historyFilter.trim().length === 0 ? "No commits found." : "No commits match the current filter."}
                     </div>
                   ) : (
-                    filteredHistory.map((commit, index) => (
-                      <button
-                        aria-pressed={selectedCommitOid === commit.oid}
-                        className={cn(
-                          "flex w-full min-w-0 gap-2 border-b px-3 py-2.5 text-left last:border-b-0 hover:bg-muted",
-                          selectedCommitOid === commit.oid && "bg-muted"
-                        )}
-                        key={commit.oid}
-                        onClick={() => {
-                          void selectCommit(commit);
-                        }}
-                        type="button"
-                      >
-                        <CommitGraphRail commit={commit} index={index} total={filteredHistory.length} />
-                        <span className="min-w-0 flex-1">
-                          <span className="flex min-w-0 items-center gap-2">
-                            <span className="truncate text-sm font-medium">{commit.subject}</span>
-                            <CommitRefBadges refs={commit.refs} />
+                    commitGraphRows.map((row) => {
+                      const commit = row.commit;
+
+                      return (
+                        <button
+                          aria-pressed={selectedCommitOid === commit.oid}
+                          className={cn(
+                            "flex w-full min-w-0 gap-2 border-b px-3 py-2.5 text-left last:border-b-0 hover:bg-muted",
+                            selectedCommitOid === commit.oid && "bg-muted"
+                          )}
+                          key={commit.oid}
+                          onClick={() => {
+                            void selectCommit(commit);
+                          }}
+                          type="button"
+                        >
+                          <CommitGraphRail row={row} selected={selectedCommitOid === commit.oid} />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="truncate text-sm font-medium">{commit.subject}</span>
+                              <CommitRefBadges refs={commit.refs} />
+                            </span>
+                            <span className="mt-1 block truncate text-xs text-muted-foreground">
+                              {commit.authorName} | {formatCommitDate(commit.authoredAt)} | {commit.shortOid}
+                            </span>
                           </span>
-                          <span className="mt-1 block truncate text-xs text-muted-foreground">
-                            {commit.authorName} | {formatCommitDate(commit.authoredAt)} | {commit.shortOid}
-                          </span>
-                        </span>
-                      </button>
-                    ))
+                        </button>
+                      );
+                    })
                   )}
                 </div>
 
@@ -2207,24 +2247,9 @@ function chooseSelectedCommitOid(commits: CommitSummary[], requestedCommitOid: s
   return commits[0]?.oid ?? null;
 }
 
-function filterCommitHistory(commits: CommitSummary[], filter: string): CommitSummary[] {
-  const query = filter.trim().toLocaleLowerCase();
-  if (query.length === 0) {
-    return commits;
-  }
-
-  return commits.filter((commit) => isCommitFilterMatch(commit, query));
-}
-
-function isCommitFilterMatch(commit: CommitSummary, query: string): boolean {
-  return (
-    commit.subject.toLocaleLowerCase().includes(query) ||
-    commit.authorName.toLocaleLowerCase().includes(query) ||
-    commit.authorEmail.toLocaleLowerCase().includes(query) ||
-    commit.oid.toLocaleLowerCase().includes(query) ||
-    commit.shortOid.toLocaleLowerCase().includes(query) ||
-    commit.refs.some((commitRef) => commitRef.toLocaleLowerCase().includes(query))
-  );
+function addHistoryFilterHint(filter: string, hint: (typeof historyFilterHints)[number]): string {
+  const trimmedFilter = filter.trim();
+  return trimmedFilter.length === 0 ? hint : `${trimmedFilter} ${hint}`;
 }
 
 async function runSyncCommand(action: "fetch" | "pull" | "push", repositoryPath: string, operationId: string): Promise<GitOperationResult> {
@@ -3376,17 +3401,69 @@ function formatProviderStatusCode(statusCode: number | null): string {
   return statusCode === null ? "No HTTP status" : `HTTP ${statusCode}`;
 }
 
-function CommitGraphRail({ commit, index, total }: { commit: CommitSummary; index: number; total: number }) {
-  const isMergeCommit = commit.parents.length > 1;
+function CommitGraphRail({ row, selected }: { row: CommitGraphRow; selected: boolean }) {
+  const railWidth = row.laneCount * commitGraphLaneWidth;
+  const connectorStartLane = Math.min(...row.connectorLanes);
+  const connectorEndLane = Math.max(...row.connectorLanes);
+  const hasConnector = connectorStartLane !== connectorEndLane;
 
   return (
-    <span className="relative flex w-8 shrink-0 self-stretch" aria-hidden="true">
-      {index === 0 ? null : <span className="absolute left-1/2 top-0 h-1/2 w-px -translate-x-1/2 bg-border" />}
-      {index === total - 1 ? null : <span className="absolute bottom-0 left-1/2 h-1/2 w-px -translate-x-1/2 bg-border" />}
-      <span className="relative m-auto size-3 rounded-full border-2 border-primary bg-background" />
-      {isMergeCommit ? <span className="absolute left-[22px] top-1/2 h-px w-2 bg-border" /> : null}
+    <span className="relative shrink-0 self-stretch" style={{ width: `${railWidth}px` }} aria-hidden="true">
+      {row.lanes.map((lane) => (
+        <CommitGraphLaneSegments lane={lane} key={lane.lane} />
+      ))}
+      {hasConnector ? (
+        <span
+          className={cn(
+            "absolute top-1/2 h-px -translate-y-1/2 rounded-full",
+            commitGraphLaneColorClass(row.currentLane)
+          )}
+          style={{
+            left: commitGraphLaneOffset(connectorStartLane),
+            width: `${(connectorEndLane - connectorStartLane) * commitGraphLaneWidth}px`
+          }}
+        />
+      ) : null}
+      <span
+        className={cn(
+          "absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-background",
+          selected ? "border-primary ring-2 ring-primary/30" : "border-background",
+          commitGraphLaneColorClass(row.currentLane)
+        )}
+        style={{ left: commitGraphLaneOffset(row.currentLane) }}
+      />
     </span>
   );
+}
+
+function CommitGraphLaneSegments({ lane }: { lane: CommitGraphLane }) {
+  return (
+    <>
+      {lane.continuesAbove ? (
+        <span
+          className={cn("absolute top-0 h-1/2 w-px -translate-x-1/2 rounded-full", commitGraphLaneColorClass(lane.colorIndex))}
+          style={{ left: commitGraphLaneOffset(lane.lane) }}
+        />
+      ) : null}
+      {lane.continuesBelow ? (
+        <span
+          className={cn(
+            "absolute bottom-0 h-1/2 w-px -translate-x-1/2 rounded-full",
+            commitGraphLaneColorClass(lane.colorIndex)
+          )}
+          style={{ left: commitGraphLaneOffset(lane.lane) }}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function commitGraphLaneOffset(laneIndex: number): string {
+  return `${laneIndex * commitGraphLaneWidth + commitGraphLaneWidth / 2}px`;
+}
+
+function commitGraphLaneColorClass(laneIndex: number): string {
+  return commitGraphLaneClasses[laneIndex % commitGraphLaneClasses.length];
 }
 
 function CommitRefBadges({ refs }: { refs: string[] }) {
@@ -3399,14 +3476,50 @@ function CommitRefBadges({ refs }: { refs: string[] }) {
 
   return (
     <span className="flex min-w-0 shrink-0 items-center gap-1">
-      {visibleRefs.map((commitRef) => (
-        <Badge className="max-w-28 truncate" key={commitRef} variant="secondary">
-          {commitRef}
-        </Badge>
-      ))}
+      {visibleRefs.map((commitRef) => {
+        const commitRefKind = classifyCommitRef(commitRef);
+
+        return (
+          <Badge
+            className={cn("max-w-28 truncate", commitRefBadgeClassName(commitRefKind))}
+            key={commitRef}
+            variant={commitRefBadgeVariant(commitRefKind)}
+          >
+            {commitRef}
+          </Badge>
+        );
+      })}
       {hiddenRefCount > 0 ? <Badge variant="outline">+{hiddenRefCount}</Badge> : null}
     </span>
   );
+}
+
+function commitRefBadgeVariant(kind: CommitRefKind): "default" | "secondary" | "outline" {
+  if (kind === "head") {
+    return "default";
+  }
+
+  if (kind === "tag" || kind === "local") {
+    return "secondary";
+  }
+
+  return "outline";
+}
+
+function commitRefBadgeClassName(kind: CommitRefKind): string {
+  if (kind === "head") {
+    return "border-primary/30 bg-primary text-primary-foreground";
+  }
+
+  if (kind === "tag") {
+    return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  }
+
+  if (kind === "local") {
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+  }
+
+  return "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300";
 }
 
 function CommitDetailsView({

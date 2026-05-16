@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import { filterCommitHistory } from "./commit-history";
 import type {
   BranchList,
   CommitDetails,
@@ -432,12 +433,7 @@ export function getBrowserRepositoryClient(): RepositoryClient {
       ]);
     },
     listCommitHistory(args) {
-      const query = args.query.trim().toLocaleLowerCase();
-      if (query.length === 0) {
-        return Promise.resolve(browserCommitHistory);
-      }
-
-      return Promise.resolve(browserCommitHistory.filter((commit) => isBrowserCommitMatch(commit, query)));
+      return Promise.resolve(filterCommitHistory(browserCommitHistory, args.query));
     },
     popStash(args) {
       return Promise.resolve(browserMutationResult(`git stash pop ${args.stashRef}`));
@@ -720,17 +716,6 @@ function copyProviderAccount(account: ProviderAccount): ProviderAccount {
 function slugBrowserAccountPart(value: string): string {
   const slug = value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return slug.length === 0 ? "account" : slug;
-}
-
-function isBrowserCommitMatch(commit: CommitSummary, query: string): boolean {
-  return (
-    commit.subject.toLocaleLowerCase().includes(query) ||
-    commit.authorName.toLocaleLowerCase().includes(query) ||
-    commit.authorEmail.toLocaleLowerCase().includes(query) ||
-    commit.oid.toLocaleLowerCase().includes(query) ||
-    commit.shortOid.toLocaleLowerCase().includes(query) ||
-    commit.refs.some((commitRef) => commitRef.toLocaleLowerCase().includes(query))
-  );
 }
 
 const browserCommitHistory: CommitSummary[] = [
