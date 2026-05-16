@@ -346,7 +346,9 @@ pub fn run() -> tauri::Result<()> {
             provider_accounts::test_provider_connection,
             provider_work_items::list_provider_work_items,
             provider_reviews::get_provider_review_details,
-            provider_reviews::submit_provider_review_comment
+            provider_reviews::submit_provider_review_comment,
+            provider_reviews::submit_provider_review_decision,
+            provider_reviews::set_provider_review_thread_resolved
         ])
         .run(tauri::generate_context!())
 }

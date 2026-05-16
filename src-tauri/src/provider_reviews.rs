@@ -108,6 +108,31 @@ pub struct ProviderReviewSubmitResult {
     pub provider_response_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderReviewDecision {
+    Approve,
+    RequestChanges,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderReviewDecisionResult {
+    pub command: String,
+    pub message: String,
+    pub provider_response_url: Option<String>,
+    pub provider_response_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderReviewThreadResolutionResult {
+    pub command: String,
+    pub message: String,
+    pub provider_response_url: Option<String>,
+    pub provider_response_id: Option<String>,
+}
+
 struct ReviewSource {
     remote: ProviderRemote,
     account: ProviderAccountToken,
@@ -192,6 +217,92 @@ pub async fn submit_provider_review_comment(
         }
         ProviderKind::Gitlab | ProviderKind::CustomGitlab => {
             submit_gitlab_review_comment(&client, &source, &parsed_item_id, &body, target).await
+        }
+    }
+}
+
+/// Submits a provider-neutral PR/MR review decision with the selected provider account.
+///
+/// # Errors
+///
+/// Returns an operation error when the selected item, provider account, remote,
+/// provider decision, or provider API response cannot be resolved.
+#[tauri::command]
+pub async fn submit_provider_review_decision(
+    app_handle: AppHandle,
+    repository_path: String,
+    item_id: String,
+    account_id: String,
+    decision: ProviderReviewDecision,
+    body: Option<String>,
+) -> Result<ProviderReviewDecisionResult, OperationError> {
+    let parsed_item_id = parse_review_item_id(&item_id)?;
+    let source = provider_review_source_for_item(
+        &app_handle,
+        Path::new(&repository_path),
+        &parsed_item_id,
+        &account_id,
+    )?;
+    let client = Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .map_err(|error| operation_error("failed to create provider HTTP client", error))?;
+
+    match parsed_item_id.provider_kind {
+        ProviderKind::Github => {
+            submit_github_review_decision(
+                &client,
+                &source,
+                &parsed_item_id,
+                decision,
+                body.as_deref(),
+            )
+            .await
+        }
+        ProviderKind::Gitlab | ProviderKind::CustomGitlab => {
+            submit_gitlab_review_decision(&client, &source, &parsed_item_id, decision).await
+        }
+    }
+}
+
+/// Resolves or reopens a provider review thread with the selected provider account.
+///
+/// # Errors
+///
+/// Returns an operation error when the selected item, provider account, remote,
+/// thread, or provider API response cannot be resolved.
+#[tauri::command]
+pub async fn set_provider_review_thread_resolved(
+    app_handle: AppHandle,
+    repository_path: String,
+    item_id: String,
+    account_id: String,
+    thread_id: String,
+    resolved: bool,
+) -> Result<ProviderReviewThreadResolutionResult, OperationError> {
+    let parsed_item_id = parse_review_item_id(&item_id)?;
+    let source = provider_review_source_for_item(
+        &app_handle,
+        Path::new(&repository_path),
+        &parsed_item_id,
+        &account_id,
+    )?;
+    let client = Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .map_err(|error| operation_error("failed to create provider HTTP client", error))?;
+
+    match parsed_item_id.provider_kind {
+        ProviderKind::Github => Err(unsupported_github_thread_resolution_error()),
+        ProviderKind::Gitlab | ProviderKind::CustomGitlab => {
+            set_gitlab_review_thread_resolved(
+                &client,
+                &source,
+                &parsed_item_id,
+                &thread_id,
+                resolved,
+            )
+            .await
         }
     }
 }
@@ -350,6 +461,150 @@ async fn submit_provider_comment_request(
         message: String::from("Submitted provider review comment."),
         provider_response_url: response_ref.url,
         provider_response_id: response_ref.id,
+    })
+}
+
+async fn submit_github_review_decision(
+    client: &Client,
+    source: &ReviewSource,
+    item_id: &ReviewItemId,
+    decision: ProviderReviewDecision,
+    body: Option<&str>,
+) -> Result<ProviderReviewDecisionResult, OperationError> {
+    let Some(project) = remote_project(&source.remote) else {
+        return Err(OperationError::parse(
+            "selected provider remote has no project path",
+        ));
+    };
+    let url = build_github_pull_request_review_decision_url(
+        project.owner,
+        project.repository,
+        item_id.number,
+    );
+    let payload = build_github_pull_request_review_decision_payload(decision, body)?;
+
+    submit_provider_review_decision_request(client, &url, source.account.token(), Some(&payload))
+        .await
+}
+
+async fn submit_gitlab_review_decision(
+    client: &Client,
+    source: &ReviewSource,
+    item_id: &ReviewItemId,
+    decision: ProviderReviewDecision,
+) -> Result<ProviderReviewDecisionResult, OperationError> {
+    match decision {
+        ProviderReviewDecision::Approve => {
+            let Some(project) = remote_project(&source.remote) else {
+                return Err(OperationError::parse(
+                    "selected provider remote has no project path",
+                ));
+            };
+            let url = build_gitlab_merge_request_approval_url(
+                source.account.base_url(),
+                project.owner,
+                project.repository,
+                item_id.number,
+            );
+
+            submit_provider_review_decision_request(client, &url, source.account.token(), None)
+                .await
+        }
+        ProviderReviewDecision::RequestChanges => {
+            Err(unsupported_gitlab_review_decision_error(decision))
+        }
+    }
+}
+
+async fn submit_provider_review_decision_request(
+    client: &Client,
+    url: &str,
+    token: &str,
+    payload: Option<&Value>,
+) -> Result<ProviderReviewDecisionResult, OperationError> {
+    let mut request = client
+        .post(url)
+        .header(AUTHORIZATION, authorization_header_value(token))
+        .header(USER_AGENT, user_agent_header_value());
+    if let Some(payload) = payload {
+        request = request
+            .header(CONTENT_TYPE, "application/json")
+            .body(payload.to_string());
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|error| operation_error("provider review decision request failed", error))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(OperationError::parse(format!(
+            "provider review decision request returned HTTP {}",
+            status.as_u16()
+        )));
+    }
+    let text = response.text().await.map_err(|error| {
+        operation_error("failed to read provider review decision response", error)
+    })?;
+    let response_ref = parse_provider_submit_response_json(&text)?;
+
+    Ok(ProviderReviewDecisionResult {
+        command: format!("POST {url}"),
+        message: String::from("Submitted provider review decision."),
+        provider_response_url: response_ref.url,
+        provider_response_id: response_ref.id,
+    })
+}
+
+async fn set_gitlab_review_thread_resolved(
+    client: &Client,
+    source: &ReviewSource,
+    item_id: &ReviewItemId,
+    thread_id: &str,
+    resolved: bool,
+) -> Result<ProviderReviewThreadResolutionResult, OperationError> {
+    let Some(project) = remote_project(&source.remote) else {
+        return Err(OperationError::parse(
+            "selected provider remote has no project path",
+        ));
+    };
+    let url = build_gitlab_merge_request_discussion_resolution_url(
+        source.account.base_url(),
+        project.owner,
+        project.repository,
+        item_id.number,
+        thread_id,
+    );
+    let payload = build_gitlab_merge_request_discussion_resolution_payload(resolved);
+    let response = client
+        .put(&url)
+        .header(
+            AUTHORIZATION,
+            authorization_header_value(source.account.token()),
+        )
+        .header(CONTENT_TYPE, "application/json")
+        .header(USER_AGENT, user_agent_header_value())
+        .body(payload.to_string())
+        .send()
+        .await
+        .map_err(|error| operation_error("provider thread resolution request failed", error))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(OperationError::parse(format!(
+            "provider thread resolution request returned HTTP {}",
+            status.as_u16()
+        )));
+    }
+    let text = response.text().await.map_err(|error| {
+        operation_error("failed to read provider thread resolution response", error)
+    })?;
+    let response_ref = parse_provider_submit_response_json(&text)?;
+
+    Ok(ProviderReviewThreadResolutionResult {
+        command: format!("PUT {url}"),
+        message: String::from("Updated provider review thread resolution."),
+        provider_response_url: response_ref.url,
+        provider_response_id: response_ref.id.or_else(|| Some(thread_id.to_owned())),
     })
 }
 
@@ -638,6 +893,14 @@ fn build_github_pull_request_review_comment_submit_url(
     format!("https://api.github.com/repos/{owner}/{repository}/pulls/{number}/comments")
 }
 
+fn build_github_pull_request_review_decision_url(
+    owner: &str,
+    repository: &str,
+    number: u64,
+) -> String {
+    format!("https://api.github.com/repos/{owner}/{repository}/pulls/{number}/reviews")
+}
+
 fn build_gitlab_merge_request_url(
     base_url: &str,
     owner: &str,
@@ -680,6 +943,20 @@ fn build_gitlab_merge_request_discussions_url(
     )
 }
 
+fn build_gitlab_merge_request_approval_url(
+    base_url: &str,
+    owner: &str,
+    repository: &str,
+    merge_request_iid: u64,
+) -> String {
+    let project_path = project_path_relative_to_base_url(base_url, owner, repository);
+    format!(
+        "{}/api/v4/projects/{}/merge_requests/{merge_request_iid}/approve",
+        normalized_base_url(base_url),
+        encoded_gitlab_project_path(&project_path)
+    )
+}
+
 fn build_gitlab_merge_request_note_submit_url(
     base_url: &str,
     owner: &str,
@@ -708,10 +985,56 @@ fn build_gitlab_merge_request_discussion_submit_url(
     )
 }
 
+fn build_gitlab_merge_request_discussion_resolution_url(
+    base_url: &str,
+    owner: &str,
+    repository: &str,
+    merge_request_iid: u64,
+    thread_id: &str,
+) -> String {
+    let project_path = project_path_relative_to_base_url(base_url, owner, repository);
+    format!(
+        "{}/api/v4/projects/{}/merge_requests/{merge_request_iid}/discussions/{}",
+        normalized_base_url(base_url),
+        encoded_gitlab_project_path(&project_path),
+        percent_encode(thread_id)
+    )
+}
+
 fn build_github_issue_comment_payload(body: &str) -> Value {
     json!({
         "body": body
     })
+}
+
+fn build_github_pull_request_review_decision_payload(
+    decision: ProviderReviewDecision,
+    body: Option<&str>,
+) -> Result<Value, OperationError> {
+    let body = body.map(str::trim).filter(|value| !value.is_empty());
+    if decision == ProviderReviewDecision::RequestChanges && body.is_none() {
+        return Err(OperationError::parse(
+            "GitHub request changes reviews require a body",
+        ));
+    }
+
+    let mut payload = serde_json::Map::new();
+    payload.insert(
+        String::from("event"),
+        json!(github_pull_request_review_event(decision)),
+    );
+    if let Some(body) = body {
+        payload.insert(String::from("body"), json!(body));
+    }
+
+    Ok(Value::Object(payload))
+}
+
+const fn github_pull_request_review_event(decision: ProviderReviewDecision) -> &'static str {
+    match decision {
+        ProviderReviewDecision::Approve => "APPROVE",
+        ProviderReviewDecision::RequestChanges => "REQUEST_CHANGES",
+    }
 }
 
 fn build_github_pull_request_review_comment_payload(
@@ -792,6 +1115,29 @@ fn build_gitlab_merge_request_discussion_payload(
         "body": body,
         "position": position_payload
     }))
+}
+
+fn build_gitlab_merge_request_discussion_resolution_payload(resolved: bool) -> Value {
+    json!({
+        "resolved": resolved
+    })
+}
+
+fn unsupported_gitlab_review_decision_error(decision: ProviderReviewDecision) -> OperationError {
+    match decision {
+        ProviderReviewDecision::Approve => OperationError::parse(
+            "GitLab approve reviews are supported through GitLab REST approvals.",
+        ),
+        ProviderReviewDecision::RequestChanges => OperationError::parse(
+            "GitLab request changes is unsupported: GitLab REST approvals do not provide a provider-neutral request-changes equivalent.",
+        ),
+    }
+}
+
+fn unsupported_github_thread_resolution_error() -> OperationError {
+    OperationError::parse(
+        "GitHub thread resolution is unsupported in this milestone because it requires GraphQL.",
+    )
 }
 
 fn parse_github_pull_request_json(json: &str) -> Result<GithubPullRequest, OperationError> {
@@ -1325,19 +1671,25 @@ mod tests {
     use crate::{
         provider_accounts::ProviderKind,
         provider_reviews::{
-            ProviderReviewDetails, ProviderReviewFile, ProviderReviewPosition,
-            ProviderReviewSubmitResult, ProviderReviewThread, build_github_issue_comment_payload,
-            build_github_pull_request_files_url,
+            ProviderReviewDecision, ProviderReviewDecisionResult, ProviderReviewDetails,
+            ProviderReviewFile, ProviderReviewPosition, ProviderReviewSubmitResult,
+            ProviderReviewThread, ProviderReviewThreadResolutionResult,
+            build_github_issue_comment_payload, build_github_pull_request_files_url,
             build_github_pull_request_issue_comment_submit_url,
             build_github_pull_request_issue_comments_url,
             build_github_pull_request_review_comment_payload,
             build_github_pull_request_review_comment_submit_url,
-            build_github_pull_request_reviews_url, build_gitlab_merge_request_diffs_url,
+            build_github_pull_request_review_decision_payload,
+            build_github_pull_request_review_decision_url, build_github_pull_request_reviews_url,
+            build_gitlab_merge_request_approval_url, build_gitlab_merge_request_diffs_url,
             build_gitlab_merge_request_discussion_payload,
+            build_gitlab_merge_request_discussion_resolution_payload,
+            build_gitlab_merge_request_discussion_resolution_url,
             build_gitlab_merge_request_discussion_submit_url,
             build_gitlab_merge_request_note_payload, build_gitlab_merge_request_note_submit_url,
             next_link_url, parse_github_issue_comments_json, parse_github_review_comments_json,
             parse_github_reviews_json, parse_gitlab_discussions_json,
+            unsupported_github_thread_resolution_error, unsupported_gitlab_review_decision_error,
         },
         provider_work_items::ProviderCheckStatus,
     };
@@ -1374,6 +1726,52 @@ mod tests {
                 "body": "Looks ready."
             })
         );
+    }
+
+    #[test]
+    fn builds_github_review_decision_url_and_payload() -> Result<(), Box<dyn Error>> {
+        assert_eq!(
+            build_github_pull_request_review_decision_url("openai", "codex", 42),
+            "https://api.github.com/repos/openai/codex/pulls/42/reviews"
+        );
+        assert_eq!(
+            build_github_pull_request_review_decision_payload(
+                ProviderReviewDecision::Approve,
+                Some("Looks ready.")
+            )?,
+            json!({
+                "event": "APPROVE",
+                "body": "Looks ready."
+            })
+        );
+        assert_eq!(
+            build_github_pull_request_review_decision_payload(
+                ProviderReviewDecision::RequestChanges,
+                Some("Please adjust this line.")
+            )?,
+            json!({
+                "event": "REQUEST_CHANGES",
+                "body": "Please adjust this line."
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_github_request_changes_without_body() -> Result<(), Box<dyn Error>> {
+        let result = build_github_pull_request_review_decision_payload(
+            ProviderReviewDecision::RequestChanges,
+            None,
+        );
+        let Err(error) = result else {
+            return Err("expected missing request changes body to fail".into());
+        };
+
+        assert_eq!(
+            error.message,
+            "GitHub request changes reviews require a body"
+        );
+        Ok(())
     }
 
     #[test]
@@ -1429,6 +1827,60 @@ mod tests {
             json!({
                 "body": "Looks ready."
             })
+        );
+    }
+
+    #[test]
+    fn builds_gitlab_approval_url() {
+        assert_eq!(
+            build_gitlab_merge_request_approval_url(
+                "https://gitlab.company.test/root/",
+                "root/platform/sub group",
+                "workbench",
+                17
+            ),
+            "https://gitlab.company.test/root/api/v4/projects/platform%2Fsub%20group%2Fworkbench/merge_requests/17/approve"
+        );
+    }
+
+    #[test]
+    fn reports_gitlab_request_changes_as_unsupported() {
+        let error =
+            unsupported_gitlab_review_decision_error(ProviderReviewDecision::RequestChanges);
+
+        assert_eq!(
+            error.message,
+            "GitLab request changes is unsupported: GitLab REST approvals do not provide a provider-neutral request-changes equivalent."
+        );
+    }
+
+    #[test]
+    fn builds_gitlab_discussion_resolution_url_and_payload() {
+        assert_eq!(
+            build_gitlab_merge_request_discussion_resolution_url(
+                "https://gitlab.company.test/root/",
+                "root/platform/sub group",
+                "workbench",
+                17,
+                "abc123"
+            ),
+            "https://gitlab.company.test/root/api/v4/projects/platform%2Fsub%20group%2Fworkbench/merge_requests/17/discussions/abc123"
+        );
+        assert_eq!(
+            build_gitlab_merge_request_discussion_resolution_payload(true),
+            json!({
+                "resolved": true
+            })
+        );
+    }
+
+    #[test]
+    fn reports_github_thread_resolution_as_unsupported() {
+        let error = unsupported_github_thread_resolution_error();
+
+        assert_eq!(
+            error.message,
+            "GitHub thread resolution is unsupported in this milestone because it requires GraphQL."
         );
     }
 
@@ -1845,6 +2297,65 @@ mod tests {
                 "message": "Submitted provider review comment.",
                 "providerResponseUrl": "https://github.com/openai/codex/pull/42#issuecomment-123",
                 "providerResponseId": "123"
+            })
+        );
+        assert!(!encoded.contains("secret-token"));
+        assert!(!encoded.contains("token"));
+        Ok(())
+    }
+
+    #[test]
+    fn serializes_decision_result_as_camel_case_without_tokens() -> Result<(), Box<dyn Error>> {
+        let result = ProviderReviewDecisionResult {
+            command: String::from(
+                "POST https://api.github.com/repos/openai/codex/pulls/42/reviews",
+            ),
+            message: String::from("Submitted provider review decision."),
+            provider_response_url: Some(String::from(
+                "https://github.com/openai/codex/pull/42#pullrequestreview-456",
+            )),
+            provider_response_id: Some(String::from("456")),
+        };
+        let value = serde_json::to_value(result)?;
+        let encoded = serde_json::to_string(&value)?;
+
+        assert_eq!(
+            value,
+            json!({
+                "command": "POST https://api.github.com/repos/openai/codex/pulls/42/reviews",
+                "message": "Submitted provider review decision.",
+                "providerResponseUrl": "https://github.com/openai/codex/pull/42#pullrequestreview-456",
+                "providerResponseId": "456"
+            })
+        );
+        assert!(!encoded.contains("secret-token"));
+        assert!(!encoded.contains("token"));
+        Ok(())
+    }
+
+    #[test]
+    fn serializes_thread_resolution_result_as_camel_case_without_tokens()
+    -> Result<(), Box<dyn Error>> {
+        let result = ProviderReviewThreadResolutionResult {
+            command: String::from(
+                "PUT https://gitlab.company.test/api/v4/projects/platform%2Fworkbench/merge_requests/17/discussions/abc123",
+            ),
+            message: String::from("Updated provider review thread resolution."),
+            provider_response_url: Some(String::from(
+                "https://gitlab.company.test/platform/workbench/-/merge_requests/17#note_55",
+            )),
+            provider_response_id: Some(String::from("abc123")),
+        };
+        let value = serde_json::to_value(result)?;
+        let encoded = serde_json::to_string(&value)?;
+
+        assert_eq!(
+            value,
+            json!({
+                "command": "PUT https://gitlab.company.test/api/v4/projects/platform%2Fworkbench/merge_requests/17/discussions/abc123",
+                "message": "Updated provider review thread resolution.",
+                "providerResponseUrl": "https://gitlab.company.test/platform/workbench/-/merge_requests/17#note_55",
+                "providerResponseId": "abc123"
             })
         );
         assert!(!encoded.contains("secret-token"));

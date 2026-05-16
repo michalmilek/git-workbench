@@ -9,8 +9,10 @@ import type {
   OperationPreview,
   ProviderAccount,
   ProviderConnectionResult,
+  ProviderReviewDecisionResult,
   ProviderReviewDetails,
   ProviderReviewSubmitResult,
+  ProviderReviewThreadResolutionResult,
   ProviderWorkItemList,
   ProviderRemoteList,
   RepositoryStatus,
@@ -43,6 +45,8 @@ describe("createRepositoryClient", () => {
         previewRebase: expect.any(Function),
         runMerge: expect.any(Function),
         runRebase: expect.any(Function),
+        setProviderReviewThreadResolved: expect.any(Function),
+        submitProviderReviewDecision: expect.any(Function),
         submitProviderReviewComment: expect.any(Function)
       })
     );
@@ -74,6 +78,20 @@ describe("createRepositoryClient", () => {
           startSha: "start-sha"
         }
       }
+    });
+    await client.submitProviderReviewDecision({
+      accountId: "account-1",
+      body: "Looks ready.",
+      decision: "approve",
+      itemId: "github:origin:42",
+      repositoryPath: "/repo"
+    });
+    await client.setProviderReviewThreadResolved({
+      accountId: "account-1",
+      itemId: "gitlab:company:17",
+      repositoryPath: "/repo",
+      resolved: true,
+      threadId: "abc123"
     });
     await client.getFileDiff({ filePath: "src/App.tsx", repositoryPath: "/repo", staged: true });
     await client.stageFile({ filePath: "src/App.tsx", repositoryPath: "/repo" });
@@ -149,6 +167,26 @@ describe("createRepositoryClient", () => {
           }
         },
         command: "submit_provider_review_comment"
+      },
+      {
+        args: {
+          accountId: "account-1",
+          body: "Looks ready.",
+          decision: "approve",
+          itemId: "github:origin:42",
+          repositoryPath: "/repo"
+        },
+        command: "submit_provider_review_decision"
+      },
+      {
+        args: {
+          accountId: "account-1",
+          itemId: "gitlab:company:17",
+          repositoryPath: "/repo",
+          resolved: true,
+          threadId: "abc123"
+        },
+        command: "set_provider_review_thread_resolved"
       },
       {
         args: { filePath: "src/App.tsx", repositoryPath: "/repo", staged: true },
@@ -237,6 +275,8 @@ describe("browser repository client", () => {
         previewRebase: expect.any(Function),
         runMerge: expect.any(Function),
         runRebase: expect.any(Function),
+        setProviderReviewThreadResolved: expect.any(Function),
+        submitProviderReviewDecision: expect.any(Function),
         submitProviderReviewComment: expect.any(Function)
       })
     );
@@ -344,6 +384,34 @@ describe("browser repository client", () => {
       message: "Browser preview simulated provider review comment submission.",
       providerResponseId: "browser-comment-1",
       providerResponseUrl: "https://github.com/openai/codex/pull/42#browser-comment-1"
+    });
+    await expect(
+      client.submitProviderReviewDecision({
+        accountId: "account-1",
+        body: "Looks ready.",
+        decision: "approve",
+        itemId: "github:origin:42",
+        repositoryPath: "/repo"
+      })
+    ).resolves.toEqual({
+      command: "submit_provider_review_decision github:origin:42 approve",
+      message: "Browser preview simulated provider review decision submission.",
+      providerResponseId: "browser-review-decision-1",
+      providerResponseUrl: "https://github.com/openai/codex/pull/42#browser-review-decision-1"
+    });
+    await expect(
+      client.setProviderReviewThreadResolved({
+        accountId: "account-1",
+        itemId: "gitlab:company:17",
+        repositoryPath: "/repo",
+        resolved: true,
+        threadId: "abc123"
+      })
+    ).resolves.toEqual({
+      command: "set_provider_review_thread_resolved gitlab:company:17 abc123",
+      message: "Browser preview simulated provider review thread resolution.",
+      providerResponseId: "abc123",
+      providerResponseUrl: "https://gitlab.company.test/platform/workbench/-/merge_requests/17#abc123"
     });
     await expect(client.stageFile({ filePath: "src/app/App.tsx", repositoryPath: "/repo" })).resolves.toEqual({
       command: "git add -- src/app/App.tsx",
@@ -610,6 +678,8 @@ function responseForCommand(
   | ProviderWorkItemList
   | ProviderReviewDetails
   | ProviderReviewSubmitResult
+  | ProviderReviewDecisionResult
+  | ProviderReviewThreadResolutionResult
   | ProviderAccount[]
   | ProviderAccount
   | ProviderConnectionResult
@@ -680,6 +750,25 @@ function responseForCommand(
       message: "Submitted provider review comment.",
       providerResponseId: "123",
       providerResponseUrl: "https://github.com/openai/codex/pull/42#discussion_r123"
+    });
+  }
+
+  if (command === "submit_provider_review_decision") {
+    return Promise.resolve({
+      command: "POST https://api.github.com/repos/openai/codex/pulls/42/reviews",
+      message: "Submitted provider review decision.",
+      providerResponseId: "456",
+      providerResponseUrl: "https://github.com/openai/codex/pull/42#pullrequestreview-456"
+    });
+  }
+
+  if (command === "set_provider_review_thread_resolved") {
+    return Promise.resolve({
+      command:
+        "PUT https://gitlab.company.test/api/v4/projects/platform%2Fworkbench/merge_requests/17/discussions/abc123",
+      message: "Updated provider review thread resolution.",
+      providerResponseId: "abc123",
+      providerResponseUrl: "https://gitlab.company.test/platform/workbench/-/merge_requests/17#note_55"
     });
   }
 

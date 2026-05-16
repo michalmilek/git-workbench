@@ -13,9 +13,12 @@ import type {
   GitOperationResult,
   ProviderAccount,
   ProviderRemoteList,
+  ProviderReviewDecision,
+  ProviderReviewDecisionResult,
   ProviderReviewDetails,
   ProviderReviewDraftTarget,
   ProviderReviewSubmitResult,
+  ProviderReviewThreadResolutionResult,
   ProviderWorkItem,
   ProviderWorkItemList,
   RepositoryStatus,
@@ -36,9 +39,15 @@ const repositoryMocks = vi.hoisted(() => ({
   listProviderWorkItems: vi.fn<() => Promise<ProviderWorkItemList>>(),
   listStashes: vi.fn<() => Promise<StashEntry[]>>(),
   pullRepository: vi.fn<() => Promise<GitOperationResult>>(),
+  setProviderReviewThreadResolved: vi.fn<
+    (args: { accountId: string; itemId: string; repositoryPath: string; resolved: boolean; threadId: string }) => Promise<ProviderReviewThreadResolutionResult>
+  >(),
   stageFile: vi.fn<(args: { filePath: string; repositoryPath: string }) => Promise<GitOperationResult>>(),
   submitProviderReviewComment: vi.fn<
     (args: { accountId: string; body: string; itemId: string; repositoryPath: string; target: ProviderReviewDraftTarget }) => Promise<ProviderReviewSubmitResult>
+  >(),
+  submitProviderReviewDecision: vi.fn<
+    (args: { accountId: string; body?: string | null; decision: ProviderReviewDecision; itemId: string; repositoryPath: string }) => Promise<ProviderReviewDecisionResult>
   >(),
   unstageFile: vi.fn<(args: { filePath: string; repositoryPath: string }) => Promise<GitOperationResult>>()
 }));
@@ -279,6 +288,76 @@ describe("App repository health", () => {
     expect(requiredElement<HTMLTextAreaElement>(container.querySelector("#provider-review-draft-body")).value).toBe("Keep this draft.");
   });
 
+  test("submits a provider review approval and records output", async () => {
+    repositoryMocks.listProviderWorkItems.mockResolvedValue({
+      items: [providerWorkItem({ id: "github:origin:42", title: "Add provider work panel" })],
+      message: "Loaded 1 provider work item."
+    });
+
+    await openRepository(container, "/repo");
+    await setFieldValue(container, "#provider-review-decision-body", "Ship it.");
+    await clickButton(container, "Approve");
+
+    expect(repositoryMocks.submitProviderReviewDecision).toHaveBeenCalledWith({
+      accountId: "account-1",
+      body: "Ship it.",
+      decision: "approve",
+      itemId: "github:origin:42",
+      repositoryPath: "/repo"
+    });
+    expect(providerWorkItemDetailsText(container)).toContain("Submitted provider review decision.");
+    expect(container.textContent).toContain("Submit provider review decision");
+  });
+
+  test("shows unsupported provider decision errors without clearing the decision body", async () => {
+    repositoryMocks.listProviderWorkItems.mockResolvedValue({
+      items: [providerWorkItem({ id: "gitlab:company:17", providerKind: "customGitlab", title: "Update provider review" })],
+      message: "Loaded 1 provider work item."
+    });
+    repositoryMocks.getProviderReviewDetails.mockResolvedValue(
+      providerReviewDetails({
+        itemId: "gitlab:company:17",
+        providerKind: "customGitlab",
+        threads: [providerReviewThread({ id: "thread-inline-1", path: "src/app/App.tsx", resolved: false })]
+      })
+    );
+    repositoryMocks.submitProviderReviewDecision.mockRejectedValue(new Error("GitLab request changes is not supported"));
+
+    await openRepository(container, "/repo");
+    await setFieldValue(container, "#provider-review-decision-body", "Please revise.");
+    await clickButton(container, "Request changes");
+
+    expect(providerWorkItemDetailsText(container)).toContain("GitLab request changes is not supported");
+    expect(requiredElement<HTMLTextAreaElement>(container.querySelector("#provider-review-decision-body")).value).toBe("Please revise.");
+  });
+
+  test("resolves provider review threads and refreshes review details", async () => {
+    repositoryMocks.listProviderWorkItems.mockResolvedValue({
+      items: [providerWorkItem({ id: "gitlab:company:17", providerKind: "customGitlab", title: "Update provider review" })],
+      message: "Loaded 1 provider work item."
+    });
+    repositoryMocks.getProviderReviewDetails.mockResolvedValue(
+      providerReviewDetails({
+        itemId: "gitlab:company:17",
+        providerKind: "customGitlab",
+        threads: [providerReviewThread({ id: "thread-inline-1", path: "src/app/App.tsx", resolved: false })]
+      })
+    );
+
+    await openRepository(container, "/repo");
+    await clickButton(container, "Resolve");
+
+    expect(repositoryMocks.setProviderReviewThreadResolved).toHaveBeenCalledWith({
+      accountId: "account-1",
+      itemId: "gitlab:company:17",
+      repositoryPath: "/repo",
+      resolved: true,
+      threadId: "thread-inline-1"
+    });
+    expect(providerWorkItemDetailsText(container)).toContain("Updated provider review thread resolution.");
+    expect(repositoryMocks.getProviderReviewDetails).toHaveBeenCalledTimes(2);
+  });
+
   test("runs pull for selected workspace repositories only", async () => {
     repositoryMocks.pullRepository.mockResolvedValue({ command: "git pull", stderr: "", stdout: "Pulled selected repository." });
 
@@ -480,12 +559,24 @@ function resetRepositoryMocks() {
   repositoryMocks.listProviderWorkItems.mockResolvedValue({ items: [], message: "No open provider work items found." });
   repositoryMocks.listStashes.mockResolvedValue([]);
   repositoryMocks.pullRepository.mockResolvedValue({ command: "git pull", stderr: "", stdout: "" });
+  repositoryMocks.setProviderReviewThreadResolved.mockResolvedValue({
+    command: "PUT https://gitlab.company.test/api/v4/projects/platform%2Fworkbench/merge_requests/17/discussions/thread-inline-1",
+    message: "Updated provider review thread resolution.",
+    providerResponseId: "thread-inline-1",
+    providerResponseUrl: "https://gitlab.company.test/platform/workbench/-/merge_requests/17#thread-inline-1"
+  });
   repositoryMocks.stageFile.mockResolvedValue({ command: "git add -- src/App.tsx", stderr: "", stdout: "staged" });
   repositoryMocks.submitProviderReviewComment.mockResolvedValue({
     command: "POST https://api.github.com/repos/openai/codex/issues/42/comments",
     message: "Submitted provider review comment.",
     providerResponseId: "123",
     providerResponseUrl: "https://github.com/openai/codex/pull/42#issuecomment-123"
+  });
+  repositoryMocks.submitProviderReviewDecision.mockResolvedValue({
+    command: "POST https://api.github.com/repos/openai/codex/pulls/42/reviews",
+    message: "Submitted provider review decision.",
+    providerResponseId: "review-123",
+    providerResponseUrl: "https://github.com/openai/codex/pull/42#pullrequestreview-123"
   });
   repositoryMocks.unstageFile.mockResolvedValue({ command: "git restore --staged -- src/App.tsx", stderr: "", stdout: "unstaged" });
 }
