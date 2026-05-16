@@ -105,6 +105,16 @@ import {
   updateRecentRepositories
 } from "@/features/repository/repository-recents";
 import {
+  WORKSPACE_REPOSITORIES_STORAGE_KEY,
+  parseWorkspaceRepositories,
+  resetWorkspaceRepositorySelection,
+  removeWorkspaceRepository,
+  selectWorkspaceRepository,
+  serializeWorkspaceRepositories,
+  upsertWorkspaceRepository,
+  type WorkspaceRepository
+} from "@/features/repository/repository-workspace";
+import {
   getPreferredDiffMode,
   hasRepositoryStagedChanges,
   hasStagedChanges,
@@ -203,6 +213,7 @@ const commitGraphLaneClasses = [
 
 export function App() {
   const [recentRepositories, setRecentRepositories] = useState(readRecentRepositories);
+  const [workspaceRepositories, setWorkspaceRepositories] = useState<WorkspaceRepository[]>(readWorkspaceRepositories);
   const [repositoryPathInput, setRepositoryPathInput] = useState(readInitialRepositoryPath);
   const [repositoryPath, setRepositoryPath] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ViewMode>("changes");
@@ -394,6 +405,7 @@ export function App() {
       setDiffMode(nextDiffMode);
       setDiff(null);
       rememberRepository(path);
+      rememberWorkspaceRepository(path, nextStatus);
 
       if (nextFile !== null) {
         await loadFileDiff(path, nextFile.path, nextDiffMode);
@@ -1217,6 +1229,49 @@ export function App() {
     localStorage.setItem(RECENT_REPOSITORIES_STORAGE_KEY, serializeRecentRepositories(nextRepositories));
   }
 
+  function rememberWorkspaceRepository(path: string, nextStatus: RepositoryStatus) {
+    const nextSummary = summarizeRepositoryStatus(nextStatus);
+    const nextRepository: WorkspaceRepository = {
+      active: true,
+      branchLabel: nextSummary.branchLabel,
+      changedFileCount: nextSummary.changedFileCount,
+      hasUntrackedFiles: nextSummary.hasUntrackedFiles,
+      path,
+      syncLabel: nextSummary.syncLabel,
+      updatedAt: new Date().toISOString()
+    };
+
+    updateWorkspaceRepositories((repositories) => {
+      const nextRepositories = upsertWorkspaceRepository(repositories, nextRepository);
+      return selectWorkspaceRepository(nextRepositories, path);
+    });
+  }
+
+  async function switchWorkspaceRepository(path: string) {
+    const nextPath = path.trim();
+    setRepositoryPathInput(nextPath);
+    await loadRepositoryStatus(nextPath, null);
+  }
+
+  function removeInactiveWorkspaceRepository(path: string) {
+    updateWorkspaceRepositories((repositories) => {
+      const repository = repositories.find((entry) => entry.path === path.trim());
+      if (repository?.active !== false) {
+        return repositories;
+      }
+
+      return removeWorkspaceRepository(repositories, path);
+    });
+  }
+
+  function updateWorkspaceRepositories(updateRepositories: (repositories: WorkspaceRepository[]) => WorkspaceRepository[]) {
+    setWorkspaceRepositories((repositories) => {
+      const nextRepositories = updateRepositories(repositories);
+      localStorage.setItem(WORKSPACE_REPOSITORIES_STORAGE_KEY, serializeWorkspaceRepositories(nextRepositories));
+      return nextRepositories;
+    });
+  }
+
   function recordOperationResult(operation: string, result: GitOperationResult) {
     saveCommandLogEntry({
       command: result.command,
@@ -1562,30 +1617,39 @@ export function App() {
             ))}
           </nav>
 
-          <div className="mt-auto flex flex-col gap-2 rounded-md border bg-background p-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium">Recent repositories</p>
-              <Badge variant="secondary">{recentRepositories.length}</Badge>
-            </div>
-            <div className="flex max-h-48 flex-col gap-1 overflow-auto">
-              {recentRepositories.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No recent repositories yet.</p>
-              ) : (
-                recentRepositories.map((recentPath) => (
-                  <button
-                    className="truncate rounded-sm px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={busyAction !== null}
-                    key={recentPath}
-                    onClick={() => {
-                      setRepositoryPathInput(recentPath);
-                      void loadRepositoryStatus(recentPath, null);
-                    }}
-                    type="button"
-                  >
-                    {recentPath}
-                  </button>
-                ))
-              )}
+          <div className="mt-auto flex flex-col gap-3">
+            <WorkspaceRepositorySection
+              busyAction={busyAction}
+              repositories={workspaceRepositories}
+              onRemove={removeInactiveWorkspaceRepository}
+              onSwitch={(path) => void switchWorkspaceRepository(path)}
+            />
+
+            <div className="flex flex-col gap-2 rounded-md border bg-background p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">Recent repositories</p>
+                <Badge variant="secondary">{recentRepositories.length}</Badge>
+              </div>
+              <div className="flex max-h-48 flex-col gap-1 overflow-auto">
+                {recentRepositories.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No recent repositories yet.</p>
+                ) : (
+                  recentRepositories.map((recentPath) => (
+                    <button
+                      className="truncate rounded-sm px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={busyAction !== null}
+                      key={recentPath}
+                      onClick={() => {
+                        setRepositoryPathInput(recentPath);
+                        void loadRepositoryStatus(recentPath, null);
+                      }}
+                      type="button"
+                    >
+                      {recentPath}
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </aside>
@@ -2244,6 +2308,10 @@ function readRecentRepositories(): string[] {
   return parseRecentRepositories(localStorage.getItem(RECENT_REPOSITORIES_STORAGE_KEY));
 }
 
+function readWorkspaceRepositories(): WorkspaceRepository[] {
+  return resetWorkspaceRepositorySelection(parseWorkspaceRepositories(localStorage.getItem(WORKSPACE_REPOSITORIES_STORAGE_KEY)));
+}
+
 function readInitialRepositoryPath(): string {
   return readRecentRepositories()[0] ?? "";
 }
@@ -2535,6 +2603,93 @@ function chooseDiffModeAfterHunkApply(file: StatusFile | null, requestedMode: Di
   }
 
   return getPreferredDiffMode(file);
+}
+
+function WorkspaceRepositorySection({
+  busyAction,
+  onRemove,
+  onSwitch,
+  repositories
+}: {
+  busyAction: BusyAction;
+  onRemove(path: string): void;
+  onSwitch(path: string): void;
+  repositories: WorkspaceRepository[];
+}) {
+  return (
+    <section className="flex flex-col gap-2 rounded-md border bg-background p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium">Workspace</p>
+        <Badge variant="secondary">{repositories.length}</Badge>
+      </div>
+
+      <div className="flex max-h-72 flex-col gap-2 overflow-auto">
+        {repositories.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Open a repository to add it to the workspace.</p>
+        ) : (
+          repositories.map((repository) => (
+            <div
+              className={cn("rounded-md border p-2", repository.active && "border-primary bg-primary/5")}
+              key={repository.path}
+            >
+              <div className="flex min-w-0 items-start gap-1">
+                <button
+                  className="min-w-0 flex-1 text-left disabled:cursor-default"
+                  disabled={busyAction !== null || repository.active}
+                  onClick={() => {
+                    onSwitch(repository.path);
+                  }}
+                  type="button"
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-sm font-medium">{formatWorkspaceRepositoryName(repository.path)}</span>
+                    {repository.active ? <Badge variant="secondary">active</Badge> : null}
+                  </span>
+                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">{repository.path}</span>
+                </button>
+
+                {repository.active ? null : (
+                  <Button
+                    aria-label={`Remove ${repository.path} from workspace`}
+                    className="size-7 shrink-0"
+                    disabled={busyAction !== null}
+                    onClick={() => {
+                      onRemove(repository.path);
+                    }}
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <IconTrash aria-hidden="true" className="size-4" />
+                  </Button>
+                )}
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-1">
+                <Badge className="max-w-full truncate" variant="outline">
+                  {repository.branchLabel}
+                </Badge>
+                <Badge variant="outline">{repository.syncLabel}</Badge>
+                <Badge variant={repository.changedFileCount > 0 ? "secondary" : "outline"}>
+                  {formatWorkspaceChangeCount(repository.changedFileCount)}
+                </Badge>
+                {repository.hasUntrackedFiles ? <Badge variant="outline">untracked</Badge> : null}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
+function formatWorkspaceRepositoryName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
+function formatWorkspaceChangeCount(count: number): string {
+  return count === 1 ? "1 changed" : `${count} changed`;
 }
 
 function SuggestedCommitGroups({
