@@ -187,7 +187,39 @@ export type ProviderReviewCommentSubmitArgs = {
   target: ProviderReviewDraftTarget;
 };
 
+export type ProviderReviewDecision = "approve" | "requestChanges";
+
+export type ProviderReviewDecisionSubmitArgs = {
+  repositoryPath: string;
+  accountId: string;
+  itemId: string;
+  decision: ProviderReviewDecision;
+  body?: string | null;
+};
+
 export type ProviderReviewSubmitResult = {
+  command: string;
+  message: string;
+  providerResponseUrl: string | null;
+  providerResponseId: string | null;
+};
+
+export type ProviderReviewDecisionResult = {
+  command: string;
+  message: string;
+  providerResponseUrl: string | null;
+  providerResponseId: string | null;
+};
+
+export type ProviderReviewThreadResolutionArgs = {
+  repositoryPath: string;
+  accountId: string;
+  itemId: string;
+  threadId: string;
+  resolved: boolean;
+};
+
+export type ProviderReviewThreadResolutionResult = {
   command: string;
   message: string;
   providerResponseUrl: string | null;

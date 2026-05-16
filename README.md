@@ -48,6 +48,8 @@ Implemented on `main`:
 - Provider-neutral PR/MR detail surface for GitHub, GitLab.com, and self-hosted GitLab work items.
 - Local PR/MR review drafts with explicit provider payload previews.
 - Provider comment submission for top-level and inline GitHub/GitLab review comments after preview confirmation.
+- Provider review approvals and requested-changes submission where supported.
+- GitLab review thread resolve/reopen controls.
 - External PR/MR and CI/pipeline links through the system opener.
 - Smart commit grouping suggestions with conventional summaries, commit bodies, counts, and group staging.
 - Latest operation result/error panel with command, stdout, and stderr.
@@ -56,7 +58,8 @@ Implemented on `main`:
 
 Not implemented yet:
 
-- Review approvals, requested changes, and thread resolution.
+- GitHub thread resolution, which needs a GraphQL-backed follow-up.
+- Rich review status aggregation beyond basic CI/check status.
 
 See [docs/roadmap.md](docs/roadmap.md) for the active roadmap.
 
@@ -149,8 +152,8 @@ docs/
 
 ## Next Milestone
 
-The next milestone is review decisions and thread resolution:
+The next milestone is review polish and provider parity:
 
-- Review approvals and requested-changes flows.
-- Thread resolution/unresolution where providers support it.
-- Clear handling for provider permissions and unavailable review actions.
+- Add GitHub GraphQL-backed thread resolution.
+- Show richer review status and pending requested changes.
+- Tighten unavailable-action messaging per provider permissions.

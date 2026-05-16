@@ -119,6 +119,8 @@ import {
   stageHunk,
   stageFile,
   submitProviderReviewComment,
+  submitProviderReviewDecision,
+  setProviderReviewThreadResolved,
   testProviderConnection,
   unstageHunk,
   unstageFile
@@ -168,9 +170,12 @@ import type {
   ProviderCheckStatus,
   ProviderConnectionResult,
   ProviderKind,
+  ProviderReviewDecision,
+  ProviderReviewDecisionResult,
   ProviderReviewDraftPreview,
   ProviderReviewDetails,
   ProviderReviewSubmitResult,
+  ProviderReviewThreadResolutionResult,
   ProviderRemote,
   ProviderWorkItem,
   RepositoryStatus,
@@ -275,6 +280,10 @@ export function App() {
   const [providerReviewDraftPreview, setProviderReviewDraftPreview] = useState<ProviderReviewDraftPreview | null>(null);
   const [providerReviewDraftSubmitting, setProviderReviewDraftSubmitting] = useState(false);
   const [providerReviewSubmitMessage, setProviderReviewSubmitMessage] = useState("");
+  const [providerReviewDecisionBody, setProviderReviewDecisionBody] = useState("");
+  const [providerReviewDecisionBusyAction, setProviderReviewDecisionBusyAction] = useState<ProviderReviewDecision | null>(null);
+  const [providerReviewThreadBusyId, setProviderReviewThreadBusyId] = useState<string | null>(null);
+  const [providerReviewDecisionMessage, setProviderReviewDecisionMessage] = useState("");
   const [providerAccounts, setProviderAccounts] = useState<ProviderAccount[]>([]);
   const [providerAccountsLoading, setProviderAccountsLoading] = useState(false);
   const [providerAccountKind, setProviderAccountKind] = useState<ProviderAccountKind>("github");
@@ -687,6 +696,11 @@ export function App() {
     setProviderReviewSubmitMessage("");
   }
 
+  function updateProviderReviewDecisionBody(body: string) {
+    setProviderReviewDecisionBody(body);
+    setProviderReviewDecisionMessage("");
+  }
+
   function previewProviderReviewDraft() {
     const itemId = providerReviewDetails?.itemId ?? providerWorkItemDetails.selectedId;
     if (itemId === null) {
@@ -748,6 +762,75 @@ export function App() {
       setProviderReviewDraftError(operationError.message);
     } finally {
       setProviderReviewDraftSubmitting(false);
+    }
+  }
+
+  async function submitProviderReviewDecisionAction(decision: ProviderReviewDecision) {
+    const itemId = providerReviewDetails?.itemId ?? providerWorkItemDetails.selectedId;
+    const accountId = providerWorkItemDetails.detail?.accountId ?? null;
+    if (repositoryPath === null || itemId === null || accountId === null) {
+      setProviderReviewDecisionMessage("Load review details before submitting a review decision.");
+      return;
+    }
+
+    setProviderReviewDecisionBusyAction(decision);
+    setProviderReviewDecisionMessage("");
+
+    try {
+      const decisionResult = await submitProviderReviewDecision({
+        accountId,
+        body: providerReviewDecisionBody.trim(),
+        decision,
+        itemId,
+        repositoryPath
+      });
+      const result = providerReviewDecisionOperationResult(decisionResult);
+      setFeedback({ kind: "result", result });
+      recordOperationResult("Submit provider review decision", result);
+      setProviderReviewDecisionMessage(decisionResult.message);
+      setProviderReviewDecisionBody("");
+      await loadProviderReviewDetails(repositoryPath, itemId, accountId);
+    } catch (error) {
+      const operationError = describeOperationError(error);
+      setFeedback({ kind: "error", error: operationError });
+      recordOperationError("Submit provider review decision", operationError);
+      setProviderReviewDecisionMessage(operationError.message);
+    } finally {
+      setProviderReviewDecisionBusyAction(null);
+    }
+  }
+
+  async function setProviderReviewThreadResolvedAction(threadId: string, resolved: boolean) {
+    const itemId = providerReviewDetails?.itemId ?? providerWorkItemDetails.selectedId;
+    const accountId = providerWorkItemDetails.detail?.accountId ?? null;
+    if (repositoryPath === null || itemId === null || accountId === null) {
+      setProviderReviewDecisionMessage("Load review details before updating thread resolution.");
+      return;
+    }
+
+    setProviderReviewThreadBusyId(threadId);
+    setProviderReviewDecisionMessage("");
+
+    try {
+      const resolutionResult = await setProviderReviewThreadResolved({
+        accountId,
+        itemId,
+        repositoryPath,
+        resolved,
+        threadId
+      });
+      const result = providerReviewThreadResolutionOperationResult(resolutionResult);
+      setFeedback({ kind: "result", result });
+      recordOperationResult("Set provider review thread resolution", result);
+      setProviderReviewDecisionMessage(resolutionResult.message);
+      await loadProviderReviewDetails(repositoryPath, itemId, accountId);
+    } catch (error) {
+      const operationError = describeOperationError(error);
+      setFeedback({ kind: "error", error: operationError });
+      recordOperationError("Set provider review thread resolution", operationError);
+      setProviderReviewDecisionMessage(operationError.message);
+    } finally {
+      setProviderReviewThreadBusyId(null);
     }
   }
 
@@ -1890,6 +1973,10 @@ export function App() {
     setProviderReviewDraftPreview(null);
     setProviderReviewDraftSubmitting(false);
     setProviderReviewSubmitMessage("");
+    setProviderReviewDecisionBody("");
+    setProviderReviewDecisionBusyAction(null);
+    setProviderReviewThreadBusyId(null);
+    setProviderReviewDecisionMessage("");
   }
 
   function clearOperationPreviewState() {
@@ -2692,14 +2779,21 @@ export function App() {
             draftError={providerReviewDraftError}
             draftPreview={providerReviewDraftPreview}
             draftSubmitting={providerReviewDraftSubmitting}
+            decisionBody={providerReviewDecisionBody}
+            decisionBusyAction={providerReviewDecisionBusyAction}
+            decisionMessage={providerReviewDecisionMessage}
             loading={providerWorkItemsLoading}
             onDraftBodyChange={updateProviderReviewDraftBody}
+            onDecisionBodyChange={updateProviderReviewDecisionBody}
             onPreviewDraft={previewProviderReviewDraft}
+            onSubmitDecision={submitProviderReviewDecisionAction}
             onSubmitDraft={submitProviderReviewDraft}
+            onSetThreadResolved={setProviderReviewThreadResolvedAction}
             reviewDetails={providerReviewDetails}
             reviewError={providerReviewError}
             reviewLoading={providerReviewLoading}
             submitMessage={providerReviewSubmitMessage}
+            threadBusyId={providerReviewThreadBusyId}
             repositoryOpened={repositoryPath !== null}
           />
 
@@ -3060,6 +3154,30 @@ function operationPreviewResult(preview: OperationPreview): GitOperationResult {
 }
 
 function providerReviewSubmitOperationResult(result: ProviderReviewSubmitResult): GitOperationResult {
+  const responseLines = [result.message];
+  if (result.providerResponseUrl !== null) {
+    responseLines.push(result.providerResponseUrl);
+  }
+  if (result.providerResponseId !== null) {
+    responseLines.push(`Provider response id: ${result.providerResponseId}`);
+  }
+
+  return {
+    command: result.command,
+    stderr: "",
+    stdout: responseLines.join("\n")
+  };
+}
+
+function providerReviewDecisionOperationResult(result: ProviderReviewDecisionResult): GitOperationResult {
+  return providerReviewProviderResult(result);
+}
+
+function providerReviewThreadResolutionOperationResult(result: ProviderReviewThreadResolutionResult): GitOperationResult {
+  return providerReviewProviderResult(result);
+}
+
+function providerReviewProviderResult(result: ProviderReviewDecisionResult | ProviderReviewThreadResolutionResult): GitOperationResult {
   const responseLines = [result.message];
   if (result.providerResponseUrl !== null) {
     responseLines.push(result.providerResponseUrl);
@@ -4042,14 +4160,21 @@ function ProviderWorkItemDetailsPanel({
   draftError,
   draftPreview,
   draftSubmitting,
+  decisionBody,
+  decisionBusyAction,
+  decisionMessage,
   loading,
+  onDecisionBodyChange,
   onDraftBodyChange,
   onPreviewDraft,
+  onSubmitDecision,
   onSubmitDraft,
+  onSetThreadResolved,
   reviewDetails,
   reviewError,
   reviewLoading,
   submitMessage,
+  threadBusyId,
   repositoryOpened
 }: {
   detail: ProviderWorkItemDetail | null;
@@ -4057,14 +4182,21 @@ function ProviderWorkItemDetailsPanel({
   draftError: string;
   draftPreview: ProviderReviewDraftPreview | null;
   draftSubmitting: boolean;
+  decisionBody: string;
+  decisionBusyAction: ProviderReviewDecision | null;
+  decisionMessage: string;
   loading: boolean;
+  onDecisionBodyChange: (body: string) => void;
   onDraftBodyChange: (body: string) => void;
   onPreviewDraft: () => void;
+  onSubmitDecision: (decision: ProviderReviewDecision) => void;
   onSubmitDraft: () => void;
+  onSetThreadResolved: (threadId: string, resolved: boolean) => void;
   reviewDetails: ProviderReviewDetails | null;
   reviewError: string;
   reviewLoading: boolean;
   submitMessage: string;
+  threadBusyId: string | null;
   repositoryOpened: boolean;
 }) {
   return (
@@ -4115,6 +4247,17 @@ function ProviderWorkItemDetailsPanel({
             preview={draftPreview}
             submitMessage={submitMessage}
             submitting={draftSubmitting}
+          />
+          <ProviderReviewDecisionPanel
+            body={decisionBody}
+            busyAction={decisionBusyAction}
+            disabled={reviewDetails === null || reviewLoading}
+            message={decisionMessage}
+            onBodyChange={onDecisionBodyChange}
+            onDecision={onSubmitDecision}
+            onSetThreadResolved={onSetThreadResolved}
+            reviewDetails={reviewDetails}
+            threadBusyId={threadBusyId}
           />
         </div>
       )}
@@ -4175,6 +4318,79 @@ function ProviderReviewDraftPanel({
           </pre>
         </div>
       )}
+    </div>
+  );
+}
+
+function ProviderReviewDecisionPanel({
+  body,
+  busyAction,
+  disabled,
+  message,
+  onBodyChange,
+  onDecision,
+  onSetThreadResolved,
+  reviewDetails,
+  threadBusyId
+}: {
+  body: string;
+  busyAction: ProviderReviewDecision | null;
+  disabled: boolean;
+  message: string;
+  onBodyChange: (body: string) => void;
+  onDecision: (decision: ProviderReviewDecision) => void;
+  onSetThreadResolved: (threadId: string, resolved: boolean) => void;
+  reviewDetails: ProviderReviewDetails | null;
+  threadBusyId: string | null;
+}) {
+  const resolvableThreads =
+    reviewDetails?.providerKind === "github" ? [] : (reviewDetails?.threads.filter((thread) => thread.path !== null) ?? []);
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border bg-background p-2 text-xs">
+      <p className="font-medium">Review decision</p>
+      <Textarea
+        className="min-h-16 resize-y text-xs"
+        disabled={disabled}
+        id="provider-review-decision-body"
+        onChange={(event) => onBodyChange(event.target.value)}
+        placeholder="Optional approval note or required changes"
+        value={body}
+      />
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={disabled || busyAction !== null} onClick={() => onDecision("approve")} size="sm" type="button" variant="secondary">
+          {busyAction === "approve" ? "Approving" : "Approve"}
+        </Button>
+        <Button disabled={disabled || busyAction !== null} onClick={() => onDecision("requestChanges")} size="sm" type="button" variant="outline">
+          {busyAction === "requestChanges" ? "Requesting" : "Request changes"}
+        </Button>
+      </div>
+      {message.length > 0 && <p className="text-muted-foreground">{message}</p>}
+
+      <div className="flex flex-col gap-2">
+        <p className="font-medium">Threads</p>
+        {reviewDetails?.providerKind === "github" && <p className="text-muted-foreground">Thread resolution is not available for GitHub in this milestone.</p>}
+        {reviewDetails !== null && reviewDetails.providerKind !== "github" && resolvableThreads.length === 0 && (
+          <p className="text-muted-foreground">No resolvable provider threads.</p>
+        )}
+        {resolvableThreads.map((thread) => (
+          <div className="flex items-center justify-between gap-2 rounded-sm border p-2" key={thread.id}>
+            <div className="min-w-0">
+              <p className="truncate">{formatReviewThreadLocation(thread)}</p>
+              <p className="text-muted-foreground">{thread.resolved ? "Resolved" : "Open"}</p>
+            </div>
+            <Button
+              disabled={disabled || threadBusyId !== null}
+              onClick={() => onSetThreadResolved(thread.id, !thread.resolved)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {threadBusyId === thread.id ? "Updating" : thread.resolved ? "Reopen" : "Resolve"}
+            </Button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

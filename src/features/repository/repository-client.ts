@@ -15,8 +15,12 @@ import type {
   ProviderAccountInput,
   ProviderConnectionResult,
   ProviderReviewCommentSubmitArgs,
+  ProviderReviewDecisionResult,
+  ProviderReviewDecisionSubmitArgs,
   ProviderReviewDetails,
   ProviderReviewSubmitResult,
+  ProviderReviewThreadResolutionArgs,
+  ProviderReviewThreadResolutionResult,
   ProviderRemoteList,
   ProviderWorkItemList,
   RepositoryStatus,
@@ -96,6 +100,8 @@ export type RepositoryClient = {
   listProviderWorkItems(repositoryPath: string): Promise<ProviderWorkItemList>;
   getProviderReviewDetails(args: ProviderReviewDetailsArgs): Promise<ProviderReviewDetails>;
   submitProviderReviewComment(args: ProviderReviewCommentSubmitArgs): Promise<ProviderReviewSubmitResult>;
+  submitProviderReviewDecision(args: ProviderReviewDecisionSubmitArgs): Promise<ProviderReviewDecisionResult>;
+  setProviderReviewThreadResolved(args: ProviderReviewThreadResolutionArgs): Promise<ProviderReviewThreadResolutionResult>;
   listProviderAccounts(): Promise<ProviderAccount[]>;
   saveProviderAccount(input: ProviderAccountInput): Promise<ProviderAccount>;
   deleteProviderAccount(accountId: string): Promise<GitOperationResult>;
@@ -201,6 +207,12 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
     },
     submitProviderReviewComment(args) {
       return invokeCommand<ProviderReviewSubmitResult>("submit_provider_review_comment", args);
+    },
+    submitProviderReviewDecision(args) {
+      return invokeCommand<ProviderReviewDecisionResult>("submit_provider_review_decision", args);
+    },
+    setProviderReviewThreadResolved(args) {
+      return invokeCommand<ProviderReviewThreadResolutionResult>("set_provider_review_thread_resolved", args);
     },
     listProviderAccounts() {
       return invokeCommand<ProviderAccount[]>("list_provider_accounts", {});
@@ -418,6 +430,25 @@ export function getBrowserRepositoryClient(): RepositoryClient {
         providerResponseUrl: details.webUrl === null ? null : `${details.webUrl}#${providerResponseId}`
       });
     },
+    submitProviderReviewDecision(args) {
+      const details = browserProviderReviewDetails(args.itemId);
+      const providerResponseId = "browser-review-decision-1";
+      return Promise.resolve({
+        command: `submit_provider_review_decision ${args.itemId} ${args.decision}`,
+        message: "Browser preview simulated provider review decision submission.",
+        providerResponseId,
+        providerResponseUrl: details.webUrl === null ? null : `${details.webUrl}#${providerResponseId}`
+      });
+    },
+    setProviderReviewThreadResolved(args) {
+      const details = browserProviderReviewDetails(args.itemId);
+      return Promise.resolve({
+        command: `set_provider_review_thread_resolved ${args.itemId} ${args.threadId}`,
+        message: "Browser preview simulated provider review thread resolution.",
+        providerResponseId: args.threadId,
+        providerResponseUrl: details.webUrl === null ? null : `${details.webUrl}#${args.threadId}`
+      });
+    },
     listProviderAccounts() {
       return Promise.resolve(Array.from(browserProviderAccounts.values()).map(copyProviderAccount));
     },
@@ -518,6 +549,16 @@ export function getProviderReviewDetails(args: ProviderReviewDetailsArgs): Promi
 
 export function submitProviderReviewComment(args: ProviderReviewCommentSubmitArgs): Promise<ProviderReviewSubmitResult> {
   return repositoryClient.submitProviderReviewComment(args);
+}
+
+export function submitProviderReviewDecision(args: ProviderReviewDecisionSubmitArgs): Promise<ProviderReviewDecisionResult> {
+  return repositoryClient.submitProviderReviewDecision(args);
+}
+
+export function setProviderReviewThreadResolved(
+  args: ProviderReviewThreadResolutionArgs
+): Promise<ProviderReviewThreadResolutionResult> {
+  return repositoryClient.setProviderReviewThreadResolved(args);
 }
 
 export function listProviderAccounts(): Promise<ProviderAccount[]> {
