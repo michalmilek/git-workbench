@@ -46,6 +46,8 @@ Implemented on `main`:
 - Provider PR/MR work item list for the active repository.
 - Provider CI/check/pipeline status for listed PRs and MRs.
 - Provider-neutral PR/MR detail surface for GitHub, GitLab.com, and self-hosted GitLab work items.
+- Local PR/MR review drafts with explicit provider payload previews.
+- Provider comment submission for top-level and inline GitHub/GitLab review comments after preview confirmation.
 - External PR/MR and CI/pipeline links through the system opener.
 - Smart commit grouping suggestions with conventional summaries, commit bodies, counts, and group staging.
 - Latest operation result/error panel with command, stdout, and stderr.
@@ -54,7 +56,6 @@ Implemented on `main`:
 
 Not implemented yet:
 
-- Full PR/MR review and inline commenting.
 - Review approvals, requested changes, and thread resolution.
 
 See [docs/roadmap.md](docs/roadmap.md) for the active roadmap.
@@ -148,8 +149,8 @@ docs/
 
 ## Next Milestone
 
-The next milestone is local PR/MR review drafts and safe comment submission:
+The next milestone is review decisions and thread resolution:
 
-- Add local top-level and inline draft validation.
-- Show explicit provider payload previews before sending comments.
-- Submit comments through provider APIs only after preview confirmation.
+- Review approvals and requested-changes flows.
+- Thread resolution/unresolution where providers support it.
+- Clear handling for provider permissions and unavailable review actions.

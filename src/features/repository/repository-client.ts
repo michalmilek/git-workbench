@@ -14,7 +14,9 @@ import type {
   ProviderAccount,
   ProviderAccountInput,
   ProviderConnectionResult,
+  ProviderReviewCommentSubmitArgs,
   ProviderReviewDetails,
+  ProviderReviewSubmitResult,
   ProviderRemoteList,
   ProviderWorkItemList,
   RepositoryStatus,
@@ -93,6 +95,7 @@ export type RepositoryClient = {
   listProviderRemotes(repositoryPath: string): Promise<ProviderRemoteList>;
   listProviderWorkItems(repositoryPath: string): Promise<ProviderWorkItemList>;
   getProviderReviewDetails(args: ProviderReviewDetailsArgs): Promise<ProviderReviewDetails>;
+  submitProviderReviewComment(args: ProviderReviewCommentSubmitArgs): Promise<ProviderReviewSubmitResult>;
   listProviderAccounts(): Promise<ProviderAccount[]>;
   saveProviderAccount(input: ProviderAccountInput): Promise<ProviderAccount>;
   deleteProviderAccount(accountId: string): Promise<GitOperationResult>;
@@ -195,6 +198,9 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
     },
     getProviderReviewDetails(args) {
       return invokeCommand<ProviderReviewDetails>("get_provider_review_details", args);
+    },
+    submitProviderReviewComment(args) {
+      return invokeCommand<ProviderReviewSubmitResult>("submit_provider_review_comment", args);
     },
     listProviderAccounts() {
       return invokeCommand<ProviderAccount[]>("list_provider_accounts", {});
@@ -402,6 +408,16 @@ export function getBrowserRepositoryClient(): RepositoryClient {
     getProviderReviewDetails(args) {
       return Promise.resolve(browserProviderReviewDetails(args.itemId));
     },
+    submitProviderReviewComment(args) {
+      const details = browserProviderReviewDetails(args.itemId);
+      const providerResponseId = "browser-comment-1";
+      return Promise.resolve({
+        command: `submit_provider_review_comment ${args.itemId}`,
+        message: "Browser preview simulated provider review comment submission.",
+        providerResponseId,
+        providerResponseUrl: details.webUrl === null ? null : `${details.webUrl}#${providerResponseId}`
+      });
+    },
     listProviderAccounts() {
       return Promise.resolve(Array.from(browserProviderAccounts.values()).map(copyProviderAccount));
     },
@@ -498,6 +514,10 @@ export function listProviderWorkItems(repositoryPath: string): Promise<ProviderW
 
 export function getProviderReviewDetails(args: ProviderReviewDetailsArgs): Promise<ProviderReviewDetails> {
   return repositoryClient.getProviderReviewDetails(args);
+}
+
+export function submitProviderReviewComment(args: ProviderReviewCommentSubmitArgs): Promise<ProviderReviewSubmitResult> {
+  return repositoryClient.submitProviderReviewComment(args);
 }
 
 export function listProviderAccounts(): Promise<ProviderAccount[]> {

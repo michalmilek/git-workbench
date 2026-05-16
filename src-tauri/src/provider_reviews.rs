@@ -2,9 +2,10 @@ use std::{collections::BTreeMap, path::Path, time::Duration};
 
 use reqwest::{
     Client,
-    header::{AUTHORIZATION, LINK, USER_AGENT},
+    header::{AUTHORIZATION, CONTENT_TYPE, LINK, USER_AGENT},
 };
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use tauri::AppHandle;
 
 use crate::{
@@ -72,7 +73,7 @@ pub struct ProviderReviewComment {
     pub system: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderReviewPosition {
     pub provider_kind: ProviderKind,
@@ -86,6 +87,25 @@ pub struct ProviderReviewPosition {
     pub base_sha: Option<String>,
     pub start_sha: Option<String>,
     pub head_sha: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum ProviderReviewCommentTarget {
+    TopLevel,
+    Inline {
+        path: String,
+        position: Option<Box<ProviderReviewPosition>>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderReviewSubmitResult {
+    pub command: String,
+    pub message: String,
+    pub provider_response_url: Option<String>,
+    pub provider_response_id: Option<String>,
 }
 
 struct ReviewSource {
@@ -139,6 +159,43 @@ pub async fn get_provider_review_details(
     }
 }
 
+/// Submits a provider-neutral PR/MR review comment with the selected provider account.
+///
+/// # Errors
+///
+/// Returns an operation error when the selected item, provider account, remote,
+/// inline position metadata, or provider API response cannot be resolved.
+#[tauri::command]
+pub async fn submit_provider_review_comment(
+    app_handle: AppHandle,
+    repository_path: String,
+    item_id: String,
+    account_id: String,
+    body: String,
+    target: ProviderReviewCommentTarget,
+) -> Result<ProviderReviewSubmitResult, OperationError> {
+    let parsed_item_id = parse_review_item_id(&item_id)?;
+    let source = provider_review_source_for_item(
+        &app_handle,
+        Path::new(&repository_path),
+        &parsed_item_id,
+        &account_id,
+    )?;
+    let client = Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .map_err(|error| operation_error("failed to create provider HTTP client", error))?;
+
+    match parsed_item_id.provider_kind {
+        ProviderKind::Github => {
+            submit_github_review_comment(&client, &source, &parsed_item_id, &body, target).await
+        }
+        ProviderKind::Gitlab | ProviderKind::CustomGitlab => {
+            submit_gitlab_review_comment(&client, &source, &parsed_item_id, &body, target).await
+        }
+    }
+}
+
 fn provider_review_source_for_item(
     app_handle: &AppHandle,
     repository_path: &Path,
@@ -174,6 +231,126 @@ fn provider_review_source_for_item(
     }
 
     Ok(ReviewSource { remote, account })
+}
+
+async fn submit_github_review_comment(
+    client: &Client,
+    source: &ReviewSource,
+    item_id: &ReviewItemId,
+    body: &str,
+    target: ProviderReviewCommentTarget,
+) -> Result<ProviderReviewSubmitResult, OperationError> {
+    let Some(project) = remote_project(&source.remote) else {
+        return Err(OperationError::parse(
+            "selected provider remote has no project path",
+        ));
+    };
+    let (url, payload) = match target {
+        ProviderReviewCommentTarget::TopLevel => (
+            build_github_pull_request_issue_comment_submit_url(
+                project.owner,
+                project.repository,
+                item_id.number,
+            ),
+            build_github_issue_comment_payload(body),
+        ),
+        ProviderReviewCommentTarget::Inline { position, .. } => {
+            let Some(position) = position else {
+                return Err(OperationError::parse(
+                    "inline comments need provider position metadata",
+                ));
+            };
+            (
+                build_github_pull_request_review_comment_submit_url(
+                    project.owner,
+                    project.repository,
+                    item_id.number,
+                ),
+                build_github_pull_request_review_comment_payload(body, &position)?,
+            )
+        }
+    };
+
+    submit_provider_comment_request(client, &url, source.account.token(), &payload).await
+}
+
+async fn submit_gitlab_review_comment(
+    client: &Client,
+    source: &ReviewSource,
+    item_id: &ReviewItemId,
+    body: &str,
+    target: ProviderReviewCommentTarget,
+) -> Result<ProviderReviewSubmitResult, OperationError> {
+    let Some(project) = remote_project(&source.remote) else {
+        return Err(OperationError::parse(
+            "selected provider remote has no project path",
+        ));
+    };
+    let (url, payload) = match target {
+        ProviderReviewCommentTarget::TopLevel => (
+            build_gitlab_merge_request_note_submit_url(
+                source.account.base_url(),
+                project.owner,
+                project.repository,
+                item_id.number,
+            ),
+            build_gitlab_merge_request_note_payload(body),
+        ),
+        ProviderReviewCommentTarget::Inline { position, .. } => {
+            let Some(position) = position else {
+                return Err(OperationError::parse(
+                    "inline comments need provider position metadata",
+                ));
+            };
+            (
+                build_gitlab_merge_request_discussion_submit_url(
+                    source.account.base_url(),
+                    project.owner,
+                    project.repository,
+                    item_id.number,
+                ),
+                build_gitlab_merge_request_discussion_payload(body, &position)?,
+            )
+        }
+    };
+
+    submit_provider_comment_request(client, &url, source.account.token(), &payload).await
+}
+
+async fn submit_provider_comment_request(
+    client: &Client,
+    url: &str,
+    token: &str,
+    payload: &Value,
+) -> Result<ProviderReviewSubmitResult, OperationError> {
+    let response = client
+        .post(url)
+        .header(AUTHORIZATION, authorization_header_value(token))
+        .header(CONTENT_TYPE, "application/json")
+        .header(USER_AGENT, user_agent_header_value())
+        .body(payload.to_string())
+        .send()
+        .await
+        .map_err(|error| operation_error("provider submit request failed", error))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(OperationError::parse(format!(
+            "provider submit request returned HTTP {}",
+            status.as_u16()
+        )));
+    }
+    let text = response
+        .text()
+        .await
+        .map_err(|error| operation_error("failed to read provider submit response", error))?;
+    let response_ref = parse_provider_submit_response_json(&text)?;
+
+    Ok(ProviderReviewSubmitResult {
+        command: format!("POST {url}"),
+        message: String::from("Submitted provider review comment."),
+        provider_response_url: response_ref.url,
+        provider_response_id: response_ref.id,
+    })
 }
 
 async fn fetch_github_review_details(
@@ -445,6 +622,22 @@ fn build_github_pull_request_reviews_url(owner: &str, repository: &str, number: 
     format!("https://api.github.com/repos/{owner}/{repository}/pulls/{number}/reviews?per_page=100")
 }
 
+fn build_github_pull_request_issue_comment_submit_url(
+    owner: &str,
+    repository: &str,
+    number: u64,
+) -> String {
+    format!("https://api.github.com/repos/{owner}/{repository}/issues/{number}/comments")
+}
+
+fn build_github_pull_request_review_comment_submit_url(
+    owner: &str,
+    repository: &str,
+    number: u64,
+) -> String {
+    format!("https://api.github.com/repos/{owner}/{repository}/pulls/{number}/comments")
+}
+
 fn build_gitlab_merge_request_url(
     base_url: &str,
     owner: &str,
@@ -485,6 +678,120 @@ fn build_gitlab_merge_request_discussions_url(
         normalized_base_url(base_url),
         encoded_gitlab_project_path(&project_path)
     )
+}
+
+fn build_gitlab_merge_request_note_submit_url(
+    base_url: &str,
+    owner: &str,
+    repository: &str,
+    merge_request_iid: u64,
+) -> String {
+    let project_path = project_path_relative_to_base_url(base_url, owner, repository);
+    format!(
+        "{}/api/v4/projects/{}/merge_requests/{merge_request_iid}/notes",
+        normalized_base_url(base_url),
+        encoded_gitlab_project_path(&project_path)
+    )
+}
+
+fn build_gitlab_merge_request_discussion_submit_url(
+    base_url: &str,
+    owner: &str,
+    repository: &str,
+    merge_request_iid: u64,
+) -> String {
+    let project_path = project_path_relative_to_base_url(base_url, owner, repository);
+    format!(
+        "{}/api/v4/projects/{}/merge_requests/{merge_request_iid}/discussions",
+        normalized_base_url(base_url),
+        encoded_gitlab_project_path(&project_path)
+    )
+}
+
+fn build_github_issue_comment_payload(body: &str) -> Value {
+    json!({
+        "body": body
+    })
+}
+
+fn build_github_pull_request_review_comment_payload(
+    body: &str,
+    position: &ProviderReviewPosition,
+) -> Result<Value, OperationError> {
+    let path = required_position_string(position.path.as_deref(), "GitHub inline comment path")?;
+    let line = required_position_line(
+        position.line.or(position.new_line).or(position.old_line),
+        "GitHub inline comment line",
+    )?;
+    let side = required_position_string(position.side.as_deref(), "GitHub inline comment side")?;
+    let head_sha = required_position_string(
+        position.head_sha.as_deref(),
+        "GitHub inline comment head SHA",
+    )?;
+
+    Ok(json!({
+        "body": body,
+        "commit_id": head_sha,
+        "path": path,
+        "line": line,
+        "side": side
+    }))
+}
+
+fn build_gitlab_merge_request_note_payload(body: &str) -> Value {
+    json!({
+        "body": body
+    })
+}
+
+fn build_gitlab_merge_request_discussion_payload(
+    body: &str,
+    position: &ProviderReviewPosition,
+) -> Result<Value, OperationError> {
+    let position_type = required_position_string(
+        position.position_type.as_deref(),
+        "GitLab inline comment position type",
+    )?;
+    let base_sha = required_position_string(
+        position.base_sha.as_deref(),
+        "GitLab inline comment base SHA",
+    )?;
+    let start_sha = required_position_string(
+        position.start_sha.as_deref(),
+        "GitLab inline comment start SHA",
+    )?;
+    let head_sha = required_position_string(
+        position.head_sha.as_deref(),
+        "GitLab inline comment head SHA",
+    )?;
+    let new_path =
+        required_position_string(position.path.as_deref(), "GitLab inline comment path")?;
+    let old_path = position.old_path.as_deref().unwrap_or(new_path);
+    let new_line = position.new_line.or(position.line);
+
+    let mut position_payload = serde_json::Map::new();
+    position_payload.insert(String::from("position_type"), json!(position_type));
+    position_payload.insert(String::from("base_sha"), json!(base_sha));
+    position_payload.insert(String::from("start_sha"), json!(start_sha));
+    position_payload.insert(String::from("head_sha"), json!(head_sha));
+    position_payload.insert(String::from("old_path"), json!(old_path));
+    position_payload.insert(String::from("new_path"), json!(new_path));
+    if let Some(old_line) = position.old_line {
+        position_payload.insert(String::from("old_line"), json!(old_line));
+    }
+    if let Some(new_line) = new_line {
+        position_payload.insert(String::from("new_line"), json!(new_line));
+    }
+    if !position_payload.contains_key("old_line") && !position_payload.contains_key("new_line") {
+        return Err(OperationError::parse(
+            "GitLab inline comment line is missing",
+        ));
+    }
+
+    Ok(json!({
+        "body": body,
+        "position": position_payload
+    }))
 }
 
 fn parse_github_pull_request_json(json: &str) -> Result<GithubPullRequest, OperationError> {
@@ -815,8 +1122,73 @@ fn normalized_base_url(base_url: &str) -> String {
     base_url.trim().trim_end_matches('/').to_owned()
 }
 
+fn required_position_string<'a>(
+    value: Option<&'a str>,
+    label: &str,
+) -> Result<&'a str, OperationError> {
+    value.ok_or_else(|| OperationError::parse(format!("{label} is missing")))
+}
+
+fn required_position_line(value: Option<u64>, label: &str) -> Result<u64, OperationError> {
+    value.ok_or_else(|| OperationError::parse(format!("{label} is missing")))
+}
+
+fn parse_provider_submit_response_json(
+    json: &str,
+) -> Result<ProviderSubmitResponseReference, OperationError> {
+    let response: ProviderSubmitResponse = serde_json::from_str(json)
+        .map_err(|error| operation_error("failed to parse provider submit response", error))?;
+    let note = response.notes.as_ref().and_then(|notes| notes.first());
+
+    Ok(ProviderSubmitResponseReference {
+        id: response
+            .id
+            .or_else(|| note.and_then(|note| note.id.clone()))
+            .map(ProviderSubmitId::into_string),
+        url: response
+            .html_url
+            .or(response.web_url)
+            .or_else(|| note.and_then(|note| note.web_url.clone())),
+    })
+}
+
 fn operation_error(message: &str, error: impl std::fmt::Display) -> OperationError {
     OperationError::parse(format!("{message}: {error}"))
+}
+
+struct ProviderSubmitResponseReference {
+    id: Option<String>,
+    url: Option<String>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(untagged)]
+enum ProviderSubmitId {
+    Number(u64),
+    String(String),
+}
+
+impl ProviderSubmitId {
+    fn into_string(self) -> String {
+        match self {
+            Self::Number(id) => id.to_string(),
+            Self::String(id) => id,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct ProviderSubmitResponse {
+    id: Option<ProviderSubmitId>,
+    html_url: Option<String>,
+    web_url: Option<String>,
+    notes: Option<Vec<ProviderSubmitNote>>,
+}
+
+#[derive(Deserialize)]
+struct ProviderSubmitNote {
+    id: Option<ProviderSubmitId>,
+    web_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -954,11 +1326,18 @@ mod tests {
         provider_accounts::ProviderKind,
         provider_reviews::{
             ProviderReviewDetails, ProviderReviewFile, ProviderReviewPosition,
-            ProviderReviewThread, build_github_pull_request_files_url,
-            build_github_pull_request_issue_comments_url, build_github_pull_request_reviews_url,
-            build_gitlab_merge_request_diffs_url, next_link_url, parse_github_issue_comments_json,
-            parse_github_review_comments_json, parse_github_reviews_json,
-            parse_gitlab_discussions_json,
+            ProviderReviewSubmitResult, ProviderReviewThread, build_github_issue_comment_payload,
+            build_github_pull_request_files_url,
+            build_github_pull_request_issue_comment_submit_url,
+            build_github_pull_request_issue_comments_url,
+            build_github_pull_request_review_comment_payload,
+            build_github_pull_request_review_comment_submit_url,
+            build_github_pull_request_reviews_url, build_gitlab_merge_request_diffs_url,
+            build_gitlab_merge_request_discussion_payload,
+            build_gitlab_merge_request_discussion_submit_url,
+            build_gitlab_merge_request_note_payload, build_gitlab_merge_request_note_submit_url,
+            next_link_url, parse_github_issue_comments_json, parse_github_review_comments_json,
+            parse_github_reviews_json, parse_gitlab_discussions_json,
         },
         provider_work_items::ProviderCheckStatus,
     };
@@ -981,6 +1360,120 @@ mod tests {
             build_github_pull_request_reviews_url("openai", "codex", 42),
             "https://api.github.com/repos/openai/codex/pulls/42/reviews?per_page=100"
         );
+    }
+
+    #[test]
+    fn builds_github_top_level_issue_comment_submit_url_and_payload() {
+        assert_eq!(
+            build_github_pull_request_issue_comment_submit_url("openai", "codex", 42),
+            "https://api.github.com/repos/openai/codex/issues/42/comments"
+        );
+        assert_eq!(
+            build_github_issue_comment_payload("Looks ready."),
+            json!({
+                "body": "Looks ready."
+            })
+        );
+    }
+
+    #[test]
+    fn builds_github_inline_review_comment_submit_url_and_payload_from_provider_position()
+    -> Result<(), Box<dyn Error>> {
+        let position = ProviderReviewPosition {
+            provider_kind: ProviderKind::Github,
+            path: Some(String::from("src/lib.rs")),
+            line: Some(42),
+            side: Some(String::from("RIGHT")),
+            old_path: None,
+            old_line: None,
+            new_line: Some(42),
+            position_type: Some(String::from("text")),
+            base_sha: Some(String::from("base-sha")),
+            start_sha: None,
+            head_sha: Some(String::from("head-sha")),
+        };
+
+        assert_eq!(
+            build_github_pull_request_review_comment_submit_url("openai", "codex", 42),
+            "https://api.github.com/repos/openai/codex/pulls/42/comments"
+        );
+        assert_eq!(
+            build_github_pull_request_review_comment_payload(
+                "Please adjust this line.",
+                &position
+            )?,
+            json!({
+                "body": "Please adjust this line.",
+                "commit_id": "head-sha",
+                "path": "src/lib.rs",
+                "line": 42,
+                "side": "RIGHT"
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn builds_gitlab_top_level_merge_request_note_submit_url_and_payload() {
+        assert_eq!(
+            build_gitlab_merge_request_note_submit_url(
+                "https://gitlab.company.test/root/",
+                "root/platform/sub group",
+                "workbench",
+                17
+            ),
+            "https://gitlab.company.test/root/api/v4/projects/platform%2Fsub%20group%2Fworkbench/merge_requests/17/notes"
+        );
+        assert_eq!(
+            build_gitlab_merge_request_note_payload("Looks ready."),
+            json!({
+                "body": "Looks ready."
+            })
+        );
+    }
+
+    #[test]
+    fn builds_gitlab_diff_discussion_submit_url_and_payload_from_provider_position()
+    -> Result<(), Box<dyn Error>> {
+        let position = ProviderReviewPosition {
+            provider_kind: ProviderKind::CustomGitlab,
+            path: Some(String::from("src/lib.rs")),
+            line: Some(22),
+            side: Some(String::from("new")),
+            old_path: Some(String::from("src/lib.rs")),
+            old_line: None,
+            new_line: Some(22),
+            position_type: Some(String::from("text")),
+            base_sha: Some(String::from("base-sha")),
+            start_sha: Some(String::from("start-sha")),
+            head_sha: Some(String::from("head-sha")),
+        };
+
+        assert_eq!(
+            build_gitlab_merge_request_discussion_submit_url(
+                "https://gitlab.company.test/root/",
+                "root/platform/sub group",
+                "workbench",
+                17
+            ),
+            "https://gitlab.company.test/root/api/v4/projects/platform%2Fsub%20group%2Fworkbench/merge_requests/17/discussions"
+        );
+        assert_eq!(
+            build_gitlab_merge_request_discussion_payload("Please adjust this line.", &position)?,
+            json!({
+                "body": "Please adjust this line.",
+                "position": {
+                    "position_type": "text",
+                    "base_sha": "base-sha",
+                    "start_sha": "start-sha",
+                    "head_sha": "head-sha",
+                    "old_path": "src/lib.rs",
+                    "new_path": "src/lib.rs",
+                    "new_line": 22
+                }
+            })
+        );
+        Ok(())
     }
 
     #[test]
@@ -1323,6 +1816,35 @@ mod tests {
                 }],
                 "threads": [],
                 "message": "Loaded provider review details."
+            })
+        );
+        assert!(!encoded.contains("secret-token"));
+        assert!(!encoded.contains("token"));
+        Ok(())
+    }
+
+    #[test]
+    fn serializes_submit_result_as_camel_case_without_tokens() -> Result<(), Box<dyn Error>> {
+        let result = ProviderReviewSubmitResult {
+            command: String::from(
+                "POST https://api.github.com/repos/openai/codex/issues/42/comments",
+            ),
+            message: String::from("Submitted provider review comment."),
+            provider_response_url: Some(String::from(
+                "https://github.com/openai/codex/pull/42#issuecomment-123",
+            )),
+            provider_response_id: Some(String::from("123")),
+        };
+        let value = serde_json::to_value(result)?;
+        let encoded = serde_json::to_string(&value)?;
+
+        assert_eq!(
+            value,
+            json!({
+                "command": "POST https://api.github.com/repos/openai/codex/issues/42/comments",
+                "message": "Submitted provider review comment.",
+                "providerResponseUrl": "https://github.com/openai/codex/pull/42#issuecomment-123",
+                "providerResponseId": "123"
             })
         );
         assert!(!encoded.contains("secret-token"));

@@ -69,16 +69,16 @@
 - Modify: `src/app/App.tsx`
 - Modify: `src/app/App.test.tsx`
 
-- [ ] Write failing helper tests for top-level draft validation.
-- [ ] Write failing helper tests for inline draft validation using provider position metadata.
-- [ ] Write failing helper tests for preview summary text.
-- [ ] Add failing App test that empty drafts cannot open a submit preview.
-- [ ] Add failing App test that a valid top-level draft opens a provider payload preview.
-- [ ] Implement draft helper functions.
-- [ ] Add local draft state and preview UI.
-- [ ] Do not persist draft bodies unless explicitly requested in a later milestone.
-- [ ] Run `bun run test:front src/features/repository/provider-review-drafts.test.ts src/app/App.test.tsx`.
-- [ ] Run `bun run typecheck`.
+- [x] Write failing helper tests for top-level draft validation.
+- [x] Write failing helper tests for inline draft validation using provider position metadata.
+- [x] Write failing helper tests for preview summary text.
+- [x] Add failing App test that empty drafts cannot open a submit preview.
+- [x] Add failing App test that a valid top-level draft opens a provider payload preview.
+- [x] Implement draft helper functions.
+- [x] Add local draft state and preview UI.
+- [x] Do not persist draft bodies unless explicitly requested in a later milestone.
+- [x] Run `bun run test:front src/features/repository/provider-review-drafts.test.ts src/app/App.test.tsx`.
+- [x] Run `bun run typecheck`.
 
 ### Task 5: Provider Comment Submission
 
@@ -89,16 +89,16 @@
 - Modify: `src/features/repository/repository-client.ts`
 - Modify: `src/features/repository/repository-client.test.ts`
 
-- [ ] Write failing Rust tests for GitHub top-level issue comment URL and payload.
-- [ ] Write failing Rust tests for GitHub inline review comment payload using provider position metadata.
-- [ ] Write failing Rust tests for GitLab top-level MR note URL and payload.
-- [ ] Write failing Rust tests for GitLab diff discussion payload using provider position metadata.
-- [ ] Write failing Rust tests proving submit result serialization does not include token values.
-- [ ] Implement `submit_provider_review_comment`.
-- [ ] Add frontend DTOs and client method.
-- [ ] Run `cd src-tauri && cargo test provider_reviews`.
-- [ ] Run `bun run test:front src/features/repository/repository-client.test.ts`.
-- [ ] Run `bun run typecheck`.
+- [x] Write failing Rust tests for GitHub top-level issue comment URL and payload.
+- [x] Write failing Rust tests for GitHub inline review comment payload using provider position metadata.
+- [x] Write failing Rust tests for GitLab top-level MR note URL and payload.
+- [x] Write failing Rust tests for GitLab diff discussion payload using provider position metadata.
+- [x] Write failing Rust tests proving submit result serialization does not include token values.
+- [x] Implement `submit_provider_review_comment`.
+- [x] Add frontend DTOs and client method.
+- [x] Run `cd src-tauri && cargo test provider_reviews`.
+- [x] Run `bun run test:front src/features/repository/repository-client.test.ts`.
+- [x] Run `bun run typecheck`.
 
 ### Task 6: Submit UI Integration
 
@@ -108,18 +108,18 @@
 - Modify: `README.md`
 - Modify: `docs/roadmap.md`
 
-- [ ] Add failing App test that submit requires preview confirmation.
-- [ ] Add failing App test that top-level submit calls the client and records result output.
-- [ ] Add failing App test that submit errors keep the draft text in place.
-- [ ] Add submit handler, busy state, result recording, and review refresh after successful submit.
-- [ ] Add docs showing review/commenting support as implemented.
-- [ ] Move the roadmap next milestone to review approvals and thread resolution.
-- [ ] Run `bun run check:front`.
-- [ ] Run `bun run build`.
-- [ ] Run `cd src-tauri && cargo test`.
-- [ ] Run `cd src-tauri && cargo fmt -- --check`.
-- [ ] Run `cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings`.
-- [ ] Run `git diff --check`.
-- [ ] Run `rg -n '!\\.' src`.
-- [ ] Run `rg -n 'println!|dbg!|unwrap\\(|expect\\(' src-tauri/src`.
-- [ ] Run browser smoke for review detail loading, draft preview, submit error display, no console errors, and mobile overflow.
+- [x] Add failing App test that submit requires preview confirmation.
+- [x] Add failing App test that top-level submit calls the client and records result output.
+- [x] Add failing App test that submit errors keep the draft text in place.
+- [x] Add submit handler, busy state, result recording, and review refresh after successful submit.
+- [x] Add docs showing review/commenting support as implemented.
+- [x] Move the roadmap next milestone to review approvals and thread resolution.
+- [x] Run `bun run check:front`.
+- [x] Run `bun run build`.
+- [x] Run `cd src-tauri && cargo test`.
+- [x] Run `cd src-tauri && cargo fmt -- --check`.
+- [x] Run `cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings`.
+- [x] Run `git diff --check`.
+- [x] Run `rg -n '!\\.' src`.
+- [x] Run `rg -n 'println!|dbg!|unwrap\\(|expect\\(' src-tauri/src`.
+- [x] Run browser smoke for review detail loading, draft preview, submit success, no console errors, and mobile overflow; App tests cover submit error display.
