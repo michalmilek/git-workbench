@@ -59,6 +59,7 @@ import {
   type OperationQueueStatus
 } from "@/features/repository/operation-queue";
 import { trustedProviderUrl } from "@/features/repository/provider-links";
+import { buildRepositoryHealth, type ProviderWorkItemsState, type RepositoryHealth } from "@/features/repository/repository-health";
 import {
   abortMerge,
   abortRebase,
@@ -172,6 +173,7 @@ type OperationExecutionAction = "run-merge" | "run-rebase" | "abort-merge" | "ab
 type ConflictRecoveryAction = Exclude<OperationExecutionAction, "run-merge" | "run-rebase">;
 type ProviderAccountAction = "save-account" | "delete-account" | "test-account" | null;
 type CommitRefKind = ReturnType<typeof classifyCommitRef>;
+type HealthBadgeVariant = "secondary" | "destructive" | "outline";
 type BusyAction =
   | "status"
   | "diff"
@@ -218,10 +220,13 @@ export function App() {
   const [repositoryPath, setRepositoryPath] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ViewMode>("changes");
   const [status, setStatus] = useState<RepositoryStatus | null>(null);
+  const [repositoryRefreshedAt, setRepositoryRefreshedAt] = useState<Date | null>(null);
+  const [repositoryHealthNow, setRepositoryHealthNow] = useState(() => new Date());
   const [providerRemotes, setProviderRemotes] = useState<ProviderRemote[]>([]);
   const [providerLoading, setProviderLoading] = useState(false);
   const [providerWorkItems, setProviderWorkItems] = useState<ProviderWorkItem[]>([]);
   const [providerWorkMessage, setProviderWorkMessage] = useState("");
+  const [providerWorkItemsState, setProviderWorkItemsState] = useState<ProviderWorkItemsState>("idle");
   const [providerWorkItemsLoading, setProviderWorkItemsLoading] = useState(false);
   const [providerAccounts, setProviderAccounts] = useState<ProviderAccount[]>([]);
   const [providerAccountsLoading, setProviderAccountsLoading] = useState(false);
@@ -271,6 +276,18 @@ export function App() {
 
   const summary = useMemo(() => (status === null ? null : summarizeRepositoryStatus(status)), [status]);
   const commitGroupSuggestions = useMemo(() => buildCommitGroupSuggestions(status?.files ?? []), [status?.files]);
+  const repositoryHealth = useMemo(
+    () =>
+      buildRepositoryHealth({
+        conflictState,
+        now: repositoryHealthNow,
+        providerWorkItems,
+        providerWorkItemsState,
+        refreshedAt: repositoryRefreshedAt,
+        status
+      }),
+    [conflictState, providerWorkItems, providerWorkItemsState, repositoryHealthNow, repositoryRefreshedAt, status]
+  );
   const filteredHistory = useMemo(() => filterCommitHistory(history, historyFilter), [history, historyFilter]);
   const commitGraphRows = useMemo(() => buildCommitGraphRows(filteredHistory), [filteredHistory]);
   const selectedFile = getSelectedFile(status, selectedFilePath);
@@ -347,6 +364,20 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (repositoryRefreshedAt === null) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setRepositoryHealthNow(new Date());
+    }, 60_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [repositoryRefreshedAt]);
+
   async function openRepository() {
     const path = repositoryPathInput.trim();
     if (path.length === 0) {
@@ -378,7 +409,21 @@ export function App() {
     const switchingRepository = path !== repositoryPath;
     const referenceRequest = createReferenceRequest();
     if (switchingRepository) {
+      setRepositoryPath(null);
+      setStatus(null);
+      setRepositoryRefreshedAt(null);
       setConflictState(null);
+      setSelectedFilePath(null);
+      setDiff(null);
+      setBranches([]);
+      setStashes([]);
+      setSelectedStashRef(null);
+      setProviderRemotes([]);
+      setProviderWorkItems([]);
+      setProviderWorkMessage("");
+      setProviderWorkItemsState("idle");
+      clearHistoryState();
+      clearOperationPreviewState();
     }
     setBusyAction("status");
 
@@ -391,15 +436,11 @@ export function App() {
       const nextFile = chooseSelectedFile(nextStatus.files, requestedFilePath);
       const nextDiffMode = nextFile === null ? "worktree" : getPreferredDiffMode(nextFile);
 
-      if (switchingRepository) {
-        clearHistoryState();
-        clearOperationPreviewState();
-        setProviderRemotes([]);
-        setProviderWorkItems([]);
-        setProviderWorkMessage("");
-      }
       setRepositoryPath(path);
       setStatus(nextStatus);
+      const refreshedAt = new Date();
+      setRepositoryRefreshedAt(refreshedAt);
+      setRepositoryHealthNow(refreshedAt);
       setConflictState(nextConflictState);
       setSelectedFilePath(nextFile?.path ?? null);
       setDiffMode(nextDiffMode);
@@ -438,6 +479,7 @@ export function App() {
         setProviderLoading(false);
         setProviderWorkItems([]);
         setProviderWorkMessage("");
+        setProviderWorkItemsState("unavailable");
         setProviderWorkItemsLoading(false);
         setSelectedStashRef(null);
         clearHistoryState();
@@ -477,12 +519,14 @@ export function App() {
 
   async function loadProviderWorkItems(path: string, requestId: number) {
     setProviderWorkItemsLoading(true);
+    setProviderWorkItemsState("loading");
 
     try {
       const nextProviderWorkItems = await listProviderWorkItems(path);
       if (isCurrentProviderWorkItemsRequest(requestId)) {
         setProviderWorkItems(nextProviderWorkItems.items);
         setProviderWorkMessage(nextProviderWorkItems.message);
+        setProviderWorkItemsState("loaded");
       }
     } catch (error) {
       if (isCurrentProviderWorkItemsRequest(requestId)) {
@@ -490,7 +534,8 @@ export function App() {
         setFeedback({ kind: "error", error: operationError });
         recordOperationError("List provider work items", operationError);
         setProviderWorkItems([]);
-        setProviderWorkMessage("");
+        setProviderWorkMessage(operationError.message);
+        setProviderWorkItemsState("unavailable");
       }
     } finally {
       if (isCurrentProviderWorkItemsRequest(requestId)) {
@@ -774,6 +819,7 @@ export function App() {
     diffRequestId.current = requestId;
 
     const nextStatus = await getRepositoryStatus(repository);
+
     if (diffRequestId.current !== requestId) {
       return;
     }
@@ -781,6 +827,9 @@ export function App() {
     const nextFile = getSelectedFile(nextStatus, filePath);
     const nextMode = chooseDiffModeAfterHunkApply(nextFile, requestedMode);
     setStatus(nextStatus);
+    const refreshedAt = new Date();
+    setRepositoryRefreshedAt(refreshedAt);
+    setRepositoryHealthNow(refreshedAt);
     setSelectedFilePath(nextFile?.path ?? null);
     setDiffMode(nextMode);
     setDiff(null);
@@ -2021,6 +2070,8 @@ export function App() {
           </div>
 
           <div className="mt-4 flex flex-col gap-3">
+            <RepositoryHealthPanel health={repositoryHealth} />
+
             <SuggestedCommitGroups
               busyAction={busyAction}
               repositoryOpened={repositoryPath !== null}
@@ -2690,6 +2741,39 @@ function formatWorkspaceRepositoryName(path: string): string {
 
 function formatWorkspaceChangeCount(count: number): string {
   return count === 1 ? "1 changed" : `${count} changed`;
+}
+
+function RepositoryHealthPanel({ health }: { health: RepositoryHealth }) {
+  const rows = [
+    { label: "Working tree", value: health.dirtyLabel, variant: health.dirtyTone },
+    { label: "Sync", value: health.syncLabel, variant: "outline" },
+    { label: "PR/MR", value: health.workItemLabel, variant: health.repositoryOpened ? "secondary" : "outline" },
+    { label: "CI", value: health.ciLabel, variant: health.ciTone },
+    { label: "Last refresh", value: health.lastRefreshLabel, variant: "outline" }
+  ] satisfies { label: string; value: string; variant: HealthBadgeVariant }[];
+
+  return (
+    <section className="rounded-md border bg-background p-3 text-sm" data-testid="repository-health-panel">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 font-medium">
+          <IconGitBranch aria-hidden="true" className="size-4 shrink-0" />
+          Repository health
+        </div>
+        <Badge variant={health.repositoryOpened ? "secondary" : "outline"}>{health.repositoryOpened ? "Open" : "No repo"}</Badge>
+      </div>
+
+      <div className="mt-3 grid gap-2">
+        {rows.map((row) => (
+          <div className="grid grid-cols-[88px_minmax(0,1fr)] items-center gap-2 text-xs" key={row.label}>
+            <span className="text-muted-foreground">{row.label}</span>
+            <Badge className="max-w-full justify-self-end truncate" variant={row.variant}>
+              {row.value}
+            </Badge>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function SuggestedCommitGroups({
