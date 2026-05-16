@@ -47,6 +47,35 @@ pub fn run_git(
     })
 }
 
+/// Runs Git without binding the command to an already-open repository.
+///
+/// # Errors
+///
+/// Returns an operation error when Git cannot be executed or exits unsuccessfully.
+pub fn run_git_without_repository(args: &[String]) -> Result<GitOperationResult, OperationError> {
+    let command = command_text(args);
+    let output = Command::new("git").args(args).output().map_err(|error| {
+        OperationError::command("failed to run git", command.clone(), error.to_string())
+    })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+
+    if !output.status.success() {
+        return Err(OperationError::command(
+            "git command failed",
+            command,
+            stderr,
+        ));
+    }
+
+    Ok(GitOperationResult {
+        command,
+        stdout,
+        stderr,
+    })
+}
+
 pub fn run_git_with_stdin(
     repository_path: &Path,
     args: &[String],

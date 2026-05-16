@@ -46,11 +46,16 @@ describe("createRepositoryClient", () => {
         runMerge: expect.any(Function),
         runRebase: expect.any(Function),
         setProviderReviewThreadResolved: expect.any(Function),
+        cloneRepository: expect.any(Function),
         submitProviderReviewDecision: expect.any(Function),
         submitProviderReviewComment: expect.any(Function)
       })
     );
 
+    await client.cloneRepository({
+      destinationPath: "/work/codex",
+      remoteUrl: "https://github.com/openai/codex.git"
+    });
     await client.getRepositoryStatus("/repo");
     await client.getConflictState("/repo");
     await client.listProviderRemotes("/repo");
@@ -137,6 +142,10 @@ describe("createRepositoryClient", () => {
     await client.testProviderConnection("company-gitlab");
 
     expect(calls).toEqual([
+      {
+        args: { destinationPath: "/work/codex", remoteUrl: "https://github.com/openai/codex.git" },
+        command: "clone_repository"
+      },
       { args: { repositoryPath: "/repo" }, command: "get_repository_status" },
       { args: { repositoryPath: "/repo" }, command: "get_conflict_state" },
       { args: { repositoryPath: "/repo" }, command: "list_provider_remotes" },
@@ -276,11 +285,22 @@ describe("browser repository client", () => {
         runMerge: expect.any(Function),
         runRebase: expect.any(Function),
         setProviderReviewThreadResolved: expect.any(Function),
+        cloneRepository: expect.any(Function),
         submitProviderReviewDecision: expect.any(Function),
         submitProviderReviewComment: expect.any(Function)
       })
     );
 
+    await expect(
+      client.cloneRepository({
+        destinationPath: "/work/codex",
+        remoteUrl: "https://github.com/openai/codex.git"
+      })
+    ).resolves.toEqual({
+      command: "git clone -- https://github.com/openai/codex.git /work/codex",
+      stderr: "",
+      stdout: "Open the app through Tauri to clone repositories."
+    });
     await expect(client.getRepositoryStatus("/repo")).resolves.toMatchObject({
       branch: "browser-preview",
       files: expect.arrayContaining([expect.objectContaining({ path: "src/app/App.tsx" })])
