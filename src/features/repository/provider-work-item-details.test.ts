@@ -16,6 +16,7 @@ describe("buildProviderWorkItemDetails", () => {
       [
         providerWorkItem({ id: "github:origin:42", title: "Add provider work panel" }),
         providerWorkItem({
+          accountId: "company-account",
           author: "sam-chen",
           checkStatus: "failed",
           ciUrl: "https://gitlab.company.test/platform/workbench/-/pipelines/20260516",
@@ -35,6 +36,7 @@ describe("buildProviderWorkItemDetails", () => {
 
     expect(result).toEqual({
       detail: {
+        accountId: "company-account",
         authorLabel: "sam-chen",
         branchFlowLabel: "fix/provider-refresh -> main",
         checkLabel: "Failed",

@@ -79,6 +79,7 @@ import {
   buildProviderWorkItemDetails,
   type ProviderWorkItemDetail
 } from "@/features/repository/provider-work-item-details";
+import { summarizeProviderReviewDetails } from "@/features/repository/provider-review-details";
 import { buildRepositoryHealth, type ProviderWorkItemsState, type RepositoryHealth } from "@/features/repository/repository-health";
 import {
   abortMerge,
@@ -96,6 +97,7 @@ import {
   getCommitDetails,
   getConflictState,
   getFileDiff,
+  getProviderReviewDetails,
   getRepositoryStatus,
   listProviderAccounts,
   listBranches,
@@ -164,6 +166,7 @@ import type {
   ProviderCheckStatus,
   ProviderConnectionResult,
   ProviderKind,
+  ProviderReviewDetails,
   ProviderRemote,
   ProviderWorkItem,
   RepositoryStatus,
@@ -258,7 +261,11 @@ export function App() {
   const [providerWorkMessage, setProviderWorkMessage] = useState("");
   const [providerWorkItemsState, setProviderWorkItemsState] = useState<ProviderWorkItemsState>("idle");
   const [providerWorkItemsLoading, setProviderWorkItemsLoading] = useState(false);
+  const [providerWorkItemsVersion, setProviderWorkItemsVersion] = useState(0);
   const [selectedProviderWorkItemId, setSelectedProviderWorkItemId] = useState<string | null>(null);
+  const [providerReviewDetails, setProviderReviewDetails] = useState<ProviderReviewDetails | null>(null);
+  const [providerReviewLoading, setProviderReviewLoading] = useState(false);
+  const [providerReviewError, setProviderReviewError] = useState("");
   const [providerAccounts, setProviderAccounts] = useState<ProviderAccount[]>([]);
   const [providerAccountsLoading, setProviderAccountsLoading] = useState(false);
   const [providerAccountKind, setProviderAccountKind] = useState<ProviderAccountKind>("github");
@@ -303,6 +310,7 @@ export function App() {
   const referenceRequestId = useRef(0);
   const providerRequestId = useRef(0);
   const providerWorkItemsRequestId = useRef(0);
+  const providerReviewRequestId = useRef(0);
   const providerAccountsRequestId = useRef(0);
   const providerAccountActionRequestId = useRef(0);
   const historyRequestId = useRef(0);
@@ -412,6 +420,17 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const selectedId = providerWorkItemDetails.selectedId;
+    const accountId = providerWorkItemDetails.detail?.accountId ?? null;
+    if (repositoryPath === null || selectedId === null || accountId === null) {
+      clearProviderReviewState();
+      return;
+    }
+
+    void loadProviderReviewDetails(repositoryPath, selectedId, accountId);
+  }, [providerWorkItemDetails.detail?.accountId, providerWorkItemDetails.selectedId, providerWorkItemsVersion, repositoryPath]);
+
+  useEffect(() => {
     if (!hasTauriRuntime()) {
       return;
     }
@@ -497,6 +516,7 @@ export function App() {
       setProviderWorkMessage("");
       setProviderWorkItemsState("idle");
       setSelectedProviderWorkItemId(null);
+      clearProviderReviewState();
       clearHistoryState();
       clearOperationPreviewState();
     }
@@ -557,6 +577,7 @@ export function App() {
         setProviderWorkItemsState("unavailable");
         setSelectedProviderWorkItemId(null);
         setProviderWorkItemsLoading(false);
+        clearProviderReviewState();
         setSelectedStashRef(null);
         clearHistoryState();
       }
@@ -603,6 +624,7 @@ export function App() {
         setProviderWorkItems(nextProviderWorkItems.items);
         setProviderWorkMessage(nextProviderWorkItems.message);
         setProviderWorkItemsState("loaded");
+        setProviderWorkItemsVersion((version) => version + 1);
         setSelectedProviderWorkItemId((currentId) => buildProviderWorkItemDetails(nextProviderWorkItems.items, currentId).selectedId);
       }
     } catch (error) {
@@ -618,6 +640,29 @@ export function App() {
     } finally {
       if (isCurrentProviderWorkItemsRequest(requestId)) {
         setProviderWorkItemsLoading(false);
+      }
+    }
+  }
+
+  async function loadProviderReviewDetails(path: string, itemId: string, accountId: string) {
+    const requestId = providerReviewRequestId.current + 1;
+    providerReviewRequestId.current = requestId;
+    setProviderReviewLoading(true);
+    setProviderReviewError("");
+
+    try {
+      const details = await getProviderReviewDetails({ accountId, itemId, repositoryPath: path });
+      if (providerReviewRequestId.current === requestId) {
+        setProviderReviewDetails(details);
+      }
+    } catch (error) {
+      if (providerReviewRequestId.current === requestId) {
+        setProviderReviewDetails(null);
+        setProviderReviewError(describeOperationError(error).message);
+      }
+    } finally {
+      if (providerReviewRequestId.current === requestId) {
+        setProviderReviewLoading(false);
       }
     }
   }
@@ -1747,6 +1792,13 @@ export function App() {
     setCommitDetailsLoading(false);
   }
 
+  function clearProviderReviewState() {
+    providerReviewRequestId.current += 1;
+    setProviderReviewDetails(null);
+    setProviderReviewError("");
+    setProviderReviewLoading(false);
+  }
+
   function clearOperationPreviewState() {
     invalidateOperationPreviewRequests();
     setOperationBranch("");
@@ -2544,6 +2596,9 @@ export function App() {
           <ProviderWorkItemDetailsPanel
             detail={providerWorkItemDetails.detail}
             loading={providerWorkItemsLoading}
+            reviewDetails={providerReviewDetails}
+            reviewError={providerReviewError}
+            reviewLoading={providerReviewLoading}
             repositoryOpened={repositoryPath !== null}
           />
 
@@ -3867,10 +3922,16 @@ function ProviderWorkItemsPanel({
 function ProviderWorkItemDetailsPanel({
   detail,
   loading,
+  reviewDetails,
+  reviewError,
+  reviewLoading,
   repositoryOpened
 }: {
   detail: ProviderWorkItemDetail | null;
   loading: boolean;
+  reviewDetails: ProviderReviewDetails | null;
+  reviewError: string;
+  reviewLoading: boolean;
   repositoryOpened: boolean;
 }) {
   return (
@@ -3909,10 +3970,98 @@ function ProviderWorkItemDetailsPanel({
             <ProviderExternalLink label="PR/MR" providerBaseUrl={detail.providerBaseUrl} url={detail.workUrl} />
             <ProviderExternalLink label="CI" providerBaseUrl={detail.providerBaseUrl} url={detail.ciUrl} />
           </div>
+
+          <ProviderReviewDetailsView details={reviewDetails} error={reviewError} loading={reviewLoading} />
         </div>
       )}
     </section>
   );
+}
+
+function ProviderReviewDetailsView({
+  details,
+  error,
+  loading
+}: {
+  details: ProviderReviewDetails | null;
+  error: string;
+  loading: boolean;
+}) {
+  if (loading) {
+    return <p className="text-xs text-muted-foreground">Loading review details...</p>;
+  }
+
+  if (error.length > 0) {
+    return <p className="text-xs text-destructive">{error}</p>;
+  }
+
+  if (details === null) {
+    return <p className="text-xs text-muted-foreground">No review details loaded.</p>;
+  }
+
+  const summary = summarizeProviderReviewDetails(details);
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-2 text-xs">
+      <div className="flex flex-wrap gap-2">
+        <Badge variant="secondary">{summary.fileCount} files</Badge>
+        <Badge variant="outline">{summary.threadCount} threads</Badge>
+        <Badge variant="outline">{summary.commentCount} comments</Badge>
+      </div>
+
+      <div className="flex max-h-40 flex-col gap-2 overflow-auto">
+        {details.files.length === 0 ? (
+          <p className="text-muted-foreground">No changed files in review details.</p>
+        ) : (
+          details.files.map((file) => (
+            <div className="rounded-sm border bg-background p-2" key={file.path}>
+              <p className="truncate font-medium">{file.path}</p>
+              <p className="text-muted-foreground">
+                {formatReviewFileStatus(file.status)} | +{formatReviewFileCount(file.additions)} -{formatReviewFileCount(file.deletions)}
+              </p>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="flex max-h-40 flex-col gap-2 overflow-auto">
+        {details.threads.length === 0 ? (
+          <p className="text-muted-foreground">No review threads.</p>
+        ) : (
+          details.threads.map((thread) => (
+            <div className="rounded-sm border bg-background p-2" key={thread.id}>
+              <p className="font-medium">{formatReviewThreadLocation(thread)}</p>
+              {thread.comments.map((comment) => (
+                <p className="mt-1 text-muted-foreground" key={comment.id}>
+                  {formatReviewCommentAuthor(comment.author)}: {comment.body}
+                </p>
+              ))}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function formatReviewFileStatus(status: string | null): string {
+  return status ?? "unknown";
+}
+
+function formatReviewFileCount(count: number | null): string {
+  return count === null ? "?" : String(count);
+}
+
+function formatReviewCommentAuthor(author: string | null): string {
+  return author ?? "unknown";
+}
+
+function formatReviewThreadLocation(thread: ProviderReviewDetails["threads"][number]): string {
+  if (thread.path === null) {
+    return "Top-level conversation";
+  }
+
+  return thread.line === null ? thread.path : `${thread.path}:${thread.line}`;
 }
 
 function ProviderDetailRow({

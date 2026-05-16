@@ -74,6 +74,7 @@ struct ProviderAccountMetadata {
 #[derive(Clone, PartialEq, Eq)]
 pub struct ProviderAccountToken {
     account_id: String,
+    provider_kind: ProviderKind,
     base_url: String,
     token: String,
 }
@@ -82,6 +83,11 @@ impl ProviderAccountToken {
     #[must_use]
     pub fn account_id(&self) -> &str {
         &self.account_id
+    }
+
+    #[must_use]
+    pub const fn provider_kind(&self) -> ProviderKind {
+        self.provider_kind
     }
 
     #[must_use]
@@ -341,6 +347,14 @@ pub fn find_provider_account_token(
     )
 }
 
+pub fn find_provider_account_token_by_id(
+    app_handle: &AppHandle,
+    account_id: &str,
+) -> Result<Option<ProviderAccountToken>, OperationError> {
+    let config_dir = app_config_dir(app_handle)?;
+    find_provider_account_token_by_id_from_config_dir(&config_dir, account_id, read_provider_token)
+}
+
 pub fn find_provider_account_token_by_host_and_owner(
     app_handle: &AppHandle,
     provider_kind: ProviderKind,
@@ -401,6 +415,7 @@ fn find_provider_account_token_from_config_dir(
         if let Some(token) = read_token(&metadata.id)? {
             return Ok(Some(ProviderAccountToken {
                 account_id: metadata.id,
+                provider_kind: metadata.provider_kind,
                 base_url: metadata.base_url,
                 token,
             }));
@@ -408,6 +423,26 @@ fn find_provider_account_token_from_config_dir(
     }
 
     Ok(None)
+}
+
+fn find_provider_account_token_by_id_from_config_dir(
+    config_dir: &Path,
+    account_id: &str,
+    mut read_token: impl FnMut(&str) -> Result<Option<String>, OperationError>,
+) -> Result<Option<ProviderAccountToken>, OperationError> {
+    let Some(metadata) = find_provider_account_metadata(config_dir, account_id)? else {
+        return Ok(None);
+    };
+    let Some(token) = read_token(&metadata.id)? else {
+        return Ok(None);
+    };
+
+    Ok(Some(ProviderAccountToken {
+        account_id: metadata.id,
+        provider_kind: metadata.provider_kind,
+        base_url: metadata.base_url,
+        token,
+    }))
 }
 
 fn find_provider_account_token_by_host_and_owner_from_config_dir(
@@ -448,6 +483,7 @@ fn find_provider_account_token_by_host_match(
         if let Some(token) = read_token(&metadata.id)? {
             return Ok(Some(ProviderAccountToken {
                 account_id: metadata.id,
+                provider_kind: metadata.provider_kind,
                 base_url: metadata.base_url,
                 token,
             }));
@@ -738,6 +774,7 @@ mod tests {
     use super::{
         ProviderAccountInput, ProviderKind, account_id_for_input, api_user_url,
         authorization_header_value, find_provider_account_token_by_host_and_owner_from_config_dir,
+        find_provider_account_token_by_id_from_config_dir,
         find_provider_account_token_from_config_dir, keychain_account_name, keychain_service_name,
         list_provider_accounts_from_config_dir, lowercase_hex, save_provider_account_metadata,
         user_agent_header_value,
@@ -923,9 +960,50 @@ mod tests {
         let encoded_accounts = serde_json::to_string(&accounts)?;
 
         assert_eq!(access.account_id(), account.id);
+        assert_eq!(access.provider_kind(), ProviderKind::Github);
         assert_eq!(access.base_url(), "https://github.com");
         assert_eq!(access.token(), "secret-token");
         assert!(!encoded_accounts.contains("secret-token"));
+        fs::remove_dir_all(config_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn finds_provider_account_token_by_exact_account_id() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let config_dir = temp_config_dir()?;
+        let first = ProviderAccountInput {
+            provider_kind: ProviderKind::Github,
+            base_url: String::from("https://github.com"),
+            label: String::from("Personal"),
+            token: String::from("personal-token"),
+        };
+        let second = ProviderAccountInput {
+            provider_kind: ProviderKind::Github,
+            base_url: String::from("https://github.com"),
+            label: String::from("Work"),
+            token: String::from("work-token"),
+        };
+        let first_account = save_provider_account_metadata(&config_dir, &first, true)?;
+        let second_account = save_provider_account_metadata(&config_dir, &second, true)?;
+        let access = find_provider_account_token_by_id_from_config_dir(
+            &config_dir,
+            &second_account.id,
+            |account_id| {
+                if account_id == second_account.id {
+                    return Ok(Some(String::from("work-token")));
+                }
+                Ok(Some(String::from("personal-token")))
+            },
+        )?;
+        let Some(access) = access else {
+            return Err("missing provider account token".into());
+        };
+
+        assert_ne!(first_account.id, access.account_id());
+        assert_eq!(access.account_id(), second_account.id);
+        assert_eq!(access.provider_kind(), ProviderKind::Github);
+        assert_eq!(access.token(), "work-token");
         fs::remove_dir_all(config_dir)?;
         Ok(())
     }

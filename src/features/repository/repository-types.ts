@@ -98,6 +98,65 @@ export type ProviderWorkItemList = {
   message: string;
 };
 
+export type ProviderReviewPosition = {
+  providerKind: ProviderAccountKind;
+  path: string | null;
+  line: number | null;
+  side: string | null;
+  oldPath: string | null;
+  oldLine: number | null;
+  newLine: number | null;
+  positionType: string | null;
+  baseSha: string | null;
+  startSha: string | null;
+  headSha: string | null;
+};
+
+export type ProviderReviewFile = {
+  path: string;
+  previousPath: string | null;
+  status: string | null;
+  additions: number | null;
+  deletions: number | null;
+  patch: string | null;
+  tooLarge: boolean;
+  collapsed: boolean;
+  position: ProviderReviewPosition | null;
+};
+
+export type ProviderReviewComment = {
+  id: string;
+  author: string | null;
+  body: string;
+  createdAt: string | null;
+  system: boolean;
+};
+
+export type ProviderReviewThread = {
+  id: string;
+  path: string | null;
+  line: number | null;
+  resolved: boolean;
+  comments: ProviderReviewComment[];
+};
+
+export type ProviderReviewDetails = {
+  itemId: string;
+  providerKind: ProviderAccountKind;
+  providerBaseUrl: string;
+  remoteName: string;
+  title: string;
+  author: string | null;
+  sourceBranch: string | null;
+  targetBranch: string | null;
+  state: string;
+  webUrl: string | null;
+  checkStatus: ProviderCheckStatus;
+  files: ProviderReviewFile[];
+  threads: ProviderReviewThread[];
+  message: string;
+};
+
 export type ProviderConnectionResult = {
   accountId: string;
   ok: boolean;

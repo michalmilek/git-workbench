@@ -9,6 +9,7 @@ import type {
   OperationPreview,
   ProviderAccount,
   ProviderConnectionResult,
+  ProviderReviewDetails,
   ProviderWorkItemList,
   ProviderRemoteList,
   RepositoryStatus,
@@ -48,6 +49,7 @@ describe("createRepositoryClient", () => {
     await client.getConflictState("/repo");
     await client.listProviderRemotes("/repo");
     await client.listProviderWorkItems("/repo");
+    await client.getProviderReviewDetails({ accountId: "account-1", itemId: "github:origin:42", repositoryPath: "/repo" });
     await client.getFileDiff({ filePath: "src/App.tsx", repositoryPath: "/repo", staged: true });
     await client.stageFile({ filePath: "src/App.tsx", repositoryPath: "/repo" });
     await client.unstageFile({ filePath: "src/App.tsx", repositoryPath: "/repo" });
@@ -96,6 +98,7 @@ describe("createRepositoryClient", () => {
       { args: { repositoryPath: "/repo" }, command: "get_conflict_state" },
       { args: { repositoryPath: "/repo" }, command: "list_provider_remotes" },
       { args: { repositoryPath: "/repo" }, command: "list_provider_work_items" },
+      { args: { accountId: "account-1", itemId: "github:origin:42", repositoryPath: "/repo" }, command: "get_provider_review_details" },
       {
         args: { filePath: "src/App.tsx", repositoryPath: "/repo", staged: true },
         command: "get_file_diff"
@@ -256,6 +259,23 @@ describe("browser repository client", () => {
         }
       ],
       message: "Browser preview provider work items."
+    });
+    await expect(client.getProviderReviewDetails({ accountId: "account-1", itemId: "github:origin:42", repositoryPath: "/repo" })).resolves.toMatchObject({
+      files: expect.arrayContaining([
+        expect.objectContaining({
+          additions: 24,
+          deletions: 6,
+          path: "src/app/App.tsx"
+        })
+      ]),
+      itemId: "github:origin:42",
+      message: "Browser preview review details.",
+      threads: expect.arrayContaining([
+        expect.objectContaining({
+          path: "src/app/App.tsx"
+        })
+      ]),
+      title: "Add provider work panel"
     });
     await expect(client.stageFile({ filePath: "src/app/App.tsx", repositoryPath: "/repo" })).resolves.toEqual({
       command: "git add -- src/app/App.tsx",
@@ -520,6 +540,7 @@ function responseForCommand(
   | StashEntry[]
   | ProviderRemoteList
   | ProviderWorkItemList
+  | ProviderReviewDetails
   | ProviderAccount[]
   | ProviderAccount
   | ProviderConnectionResult
@@ -563,6 +584,25 @@ function responseForCommand(
 
   if (command === "list_provider_work_items") {
     return Promise.resolve({ items: [], message: "No provider work items." });
+  }
+
+  if (command === "get_provider_review_details") {
+    return Promise.resolve({
+      author: "alex-rivera",
+      checkStatus: "running",
+      files: [],
+      itemId: "github:origin:42",
+      message: "Loaded review details.",
+      providerBaseUrl: "https://github.com",
+      providerKind: "github",
+      remoteName: "origin",
+      sourceBranch: "feature/provider-work-panel",
+      state: "open",
+      targetBranch: "main",
+      threads: [],
+      title: "Add provider work panel",
+      webUrl: "https://github.com/openai/codex/pull/42"
+    });
   }
 
   if (command === "list_provider_accounts") {
