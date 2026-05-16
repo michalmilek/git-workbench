@@ -36,6 +36,8 @@ pub struct OperationPreviewCommit {
 pub enum OperationPreviewKind {
     Merge,
     Rebase,
+    Pull,
+    Push,
 }
 
 /// Previews merging a source branch into the current branch without modifying the repository.
@@ -94,11 +96,74 @@ pub fn preview_rebase(
     })
 }
 
+/// Previews pulling the configured upstream into the current branch without modifying the
+/// repository.
+///
+/// # Errors
+///
+/// Returns an operation error when Git cannot be executed, exits unsuccessfully, or returns
+/// malformed preview commit output.
+pub fn preview_pull(repository_path: &Path) -> Result<OperationPreview, OperationError> {
+    let target_branch = current_branch(repository_path)?;
+    let source_branch = upstream_branch(repository_path)?;
+    let base_oid = merge_base(repository_path, &target_branch, &source_branch)?;
+    let changed_files = changed_files_since(repository_path, &base_oid, &source_branch)?;
+    let target_files = changed_files_since(repository_path, &base_oid, &target_branch)?;
+    let commits = preview_commits(repository_path, &base_oid, &source_branch)?;
+
+    Ok(OperationPreview {
+        kind: OperationPreviewKind::Pull,
+        source_branch: source_branch.clone(),
+        target_branch: target_branch.clone(),
+        command: String::from("git pull"),
+        message: format!("Preview pull from {source_branch} into {target_branch}."),
+        likely_conflict_files: intersect_file_lists(&changed_files, &target_files),
+        commits,
+        changed_files,
+    })
+}
+
+/// Previews pushing the current branch to its configured upstream without modifying the repository.
+///
+/// # Errors
+///
+/// Returns an operation error when Git cannot be executed, exits unsuccessfully, or returns
+/// malformed preview commit output.
+pub fn preview_push(repository_path: &Path) -> Result<OperationPreview, OperationError> {
+    let source_branch = current_branch(repository_path)?;
+    let target_branch = upstream_branch(repository_path)?;
+    let base_oid = merge_base(repository_path, &source_branch, &target_branch)?;
+    let changed_files = changed_files_since(repository_path, &base_oid, &source_branch)?;
+    let commits = preview_commits(repository_path, &base_oid, &source_branch)?;
+
+    Ok(OperationPreview {
+        kind: OperationPreviewKind::Push,
+        source_branch: source_branch.clone(),
+        target_branch: target_branch.clone(),
+        command: String::from("git push"),
+        message: format!("Preview push from {source_branch} to {target_branch}."),
+        likely_conflict_files: Vec::new(),
+        commits,
+        changed_files,
+    })
+}
+
 fn current_branch(repository_path: &Path) -> Result<String, OperationError> {
     let args = vec![
         String::from("rev-parse"),
         String::from("--abbrev-ref"),
         String::from("HEAD"),
+    ];
+    let output = run_git(repository_path, &args)?;
+    Ok(output.stdout.trim().to_owned())
+}
+
+fn upstream_branch(repository_path: &Path) -> Result<String, OperationError> {
+    let args = vec![
+        String::from("rev-parse"),
+        String::from("--abbrev-ref"),
+        String::from("--symbolic-full-name"),
+        String::from("@{upstream}"),
     ];
     let output = run_git(repository_path, &args)?;
     Ok(output.stdout.trim().to_owned())
@@ -208,7 +273,7 @@ mod tests {
 
     use super::{
         OperationPreview, OperationPreviewCommit, OperationPreviewKind, parse_file_list_output,
-        parse_preview_log_output, preview_merge, preview_rebase,
+        parse_preview_log_output, preview_merge, preview_pull, preview_push, preview_rebase,
     };
 
     #[test]
@@ -252,6 +317,20 @@ mod tests {
                 "changedFiles": ["src/main.rs"],
                 "likelyConflictFiles": ["README.md"]
             })
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn serializes_pull_and_push_preview_kinds() -> Result<(), Box<dyn Error>> {
+        assert_eq!(
+            serde_json::to_value(OperationPreviewKind::Pull)?,
+            json!("pull")
+        );
+        assert_eq!(
+            serde_json::to_value(OperationPreviewKind::Push)?,
+            json!("push")
         );
 
         Ok(())
@@ -367,6 +446,103 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\0bbbbbbb\0Refine preview panel\0Grace H
         Ok(())
     }
 
+    #[test]
+    fn previews_pull_from_upstream_without_changing_repository() -> Result<(), Box<dyn Error>> {
+        let repository_path = create_pull_preview_repository("pull-preview")?;
+        let starting_head = git_output(&repository_path, ["rev-parse", "HEAD"])?;
+
+        let preview = preview_pull(&repository_path)?;
+
+        assert_eq!(preview.kind, OperationPreviewKind::Pull);
+        assert_eq!(preview.source_branch, "upstream/main");
+        assert_eq!(preview.target_branch, "main");
+        assert_eq!(preview.command, "git pull");
+        assert_eq!(
+            preview.message,
+            "Preview pull from upstream/main into main."
+        );
+        assert_eq!(preview.commits.len(), 1);
+        assert_eq!(preview.commits[0].subject, "Add upstream changes");
+        assert_eq!(
+            preview.changed_files,
+            vec![String::from("incoming.txt"), String::from("shared.txt")]
+        );
+        assert_eq!(
+            preview.likely_conflict_files,
+            vec![String::from("shared.txt")]
+        );
+        assert_eq!(
+            git_output(&repository_path, ["rev-parse", "--abbrev-ref", "HEAD"])?.trim(),
+            "main"
+        );
+        assert_eq!(
+            git_output(&repository_path, ["rev-parse", "HEAD"])?,
+            starting_head
+        );
+
+        fs::remove_dir_all(repository_path)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn previews_push_to_upstream_without_changing_repository() -> Result<(), Box<dyn Error>> {
+        let repository_path = create_push_preview_repository("push-preview")?;
+        let starting_head = git_output(&repository_path, ["rev-parse", "HEAD"])?;
+
+        let preview = preview_push(&repository_path)?;
+
+        assert_eq!(preview.kind, OperationPreviewKind::Push);
+        assert_eq!(preview.source_branch, "main");
+        assert_eq!(preview.target_branch, "upstream/main");
+        assert_eq!(preview.command, "git push");
+        assert_eq!(preview.message, "Preview push from main to upstream/main.");
+        assert_eq!(preview.commits.len(), 1);
+        assert_eq!(preview.commits[0].subject, "Add local changes");
+        assert_eq!(
+            preview.changed_files,
+            vec![String::from("outgoing.txt"), String::from("shared.txt")]
+        );
+        assert!(preview.likely_conflict_files.is_empty());
+        assert_eq!(
+            git_output(&repository_path, ["rev-parse", "--abbrev-ref", "HEAD"])?.trim(),
+            "main"
+        );
+        assert_eq!(
+            git_output(&repository_path, ["rev-parse", "HEAD"])?,
+            starting_head
+        );
+
+        fs::remove_dir_all(repository_path)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn previews_push_to_remote_tracking_upstream() -> Result<(), Box<dyn Error>> {
+        let repository_path =
+            create_remote_tracking_push_preview_repository("remote-push-preview")?;
+
+        let preview = preview_push(&repository_path)?;
+
+        assert_eq!(preview.kind, OperationPreviewKind::Push);
+        assert_eq!(preview.source_branch, "main");
+        assert_eq!(preview.target_branch, "origin/main");
+        assert_eq!(preview.command, "git push");
+        assert_eq!(preview.message, "Preview push from main to origin/main.");
+        assert_eq!(preview.commits.len(), 1);
+        assert_eq!(preview.commits[0].subject, "Add local remote changes");
+        assert_eq!(
+            preview.changed_files,
+            vec![String::from("remote-local.txt")]
+        );
+        assert!(preview.likely_conflict_files.is_empty());
+
+        fs::remove_dir_all(repository_path)?;
+
+        Ok(())
+    }
+
     fn create_preview_repository(name: &str) -> Result<std::path::PathBuf, Box<dyn Error>> {
         let repository_path =
             std::env::temp_dir().join(format!("git-workbench-{name}-{}", std::process::id()));
@@ -400,6 +576,106 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\0bbbbbbb\0Refine preview panel\0Grace H
         fs::write(repository_path.join("shared.txt"), "main\n")?;
         run_git_command(&repository_path, ["add", "main.txt", "shared.txt"])?;
         run_git_command(&repository_path, ["commit", "-m", "Update main branch"])?;
+
+        Ok(repository_path)
+    }
+
+    fn create_pull_preview_repository(name: &str) -> Result<std::path::PathBuf, Box<dyn Error>> {
+        let repository_path = create_repository_with_base_commit(name)?;
+
+        run_git_command(&repository_path, ["checkout", "-b", "upstream/main"])?;
+        fs::write(repository_path.join("incoming.txt"), "incoming\n")?;
+        fs::write(repository_path.join("shared.txt"), "incoming\n")?;
+        run_git_command(&repository_path, ["add", "incoming.txt", "shared.txt"])?;
+        run_git_command(&repository_path, ["commit", "-m", "Add upstream changes"])?;
+
+        run_git_command(&repository_path, ["checkout", "main"])?;
+        run_git_command(
+            &repository_path,
+            ["branch", "--set-upstream-to=upstream/main", "main"],
+        )?;
+        fs::write(repository_path.join("local.txt"), "local\n")?;
+        fs::write(repository_path.join("shared.txt"), "local\n")?;
+        run_git_command(&repository_path, ["add", "local.txt", "shared.txt"])?;
+        run_git_command(&repository_path, ["commit", "-m", "Add local changes"])?;
+
+        Ok(repository_path)
+    }
+
+    fn create_push_preview_repository(name: &str) -> Result<std::path::PathBuf, Box<dyn Error>> {
+        let repository_path = create_repository_with_base_commit(name)?;
+
+        run_git_command(&repository_path, ["branch", "upstream/main"])?;
+        run_git_command(
+            &repository_path,
+            ["branch", "--set-upstream-to=upstream/main", "main"],
+        )?;
+        fs::write(repository_path.join("outgoing.txt"), "outgoing\n")?;
+        fs::write(repository_path.join("shared.txt"), "outgoing\n")?;
+        run_git_command(&repository_path, ["add", "outgoing.txt", "shared.txt"])?;
+        run_git_command(&repository_path, ["commit", "-m", "Add local changes"])?;
+
+        Ok(repository_path)
+    }
+
+    fn create_remote_tracking_push_preview_repository(
+        name: &str,
+    ) -> Result<std::path::PathBuf, Box<dyn Error>> {
+        let repository_path = create_repository_with_base_commit(name)?;
+        let remote_path = std::env::temp_dir().join(format!(
+            "git-workbench-{name}-remote-{}",
+            std::process::id()
+        ));
+        if remote_path.exists() {
+            fs::remove_dir_all(&remote_path)?;
+        }
+        let remote_path_text = remote_path.to_string_lossy().into_owned();
+        run_git_command(
+            &repository_path,
+            ["clone", "--bare", ".", remote_path_text.as_str()],
+        )?;
+        run_git_command(
+            &repository_path,
+            ["remote", "add", "origin", remote_path_text.as_str()],
+        )?;
+        run_git_command(&repository_path, ["fetch", "origin"])?;
+        run_git_command(
+            &repository_path,
+            ["branch", "--set-upstream-to=origin/main", "main"],
+        )?;
+        fs::write(repository_path.join("remote-local.txt"), "local\n")?;
+        run_git_command(&repository_path, ["add", "remote-local.txt"])?;
+        run_git_command(
+            &repository_path,
+            ["commit", "-m", "Add local remote changes"],
+        )?;
+
+        Ok(repository_path)
+    }
+
+    fn create_repository_with_base_commit(
+        name: &str,
+    ) -> Result<std::path::PathBuf, Box<dyn Error>> {
+        let repository_path =
+            std::env::temp_dir().join(format!("git-workbench-{name}-{}", std::process::id()));
+        if repository_path.exists() {
+            fs::remove_dir_all(&repository_path)?;
+        }
+        fs::create_dir_all(&repository_path)?;
+        run_git_command(&repository_path, ["init", "--initial-branch=main"])?;
+        run_git_command(
+            &repository_path,
+            ["config", "user.email", "qa@example.test"],
+        )?;
+        run_git_command(
+            &repository_path,
+            ["config", "user.name", "Git Workbench QA"],
+        )?;
+
+        fs::write(repository_path.join("README.md"), "base\n")?;
+        fs::write(repository_path.join("shared.txt"), "base\n")?;
+        run_git_command(&repository_path, ["add", "README.md", "shared.txt"])?;
+        run_git_command(&repository_path, ["commit", "-m", "Initial import"])?;
 
         Ok(repository_path)
     }

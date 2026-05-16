@@ -34,6 +34,7 @@ The repository already includes:
 - Provider CI/check/pipeline status for listed PRs and MRs.
 - External PR/MR and CI/pipeline links through the system opener.
 - Merge and rebase previews with source/target branch, planned command, commits, changed files, and likely conflict files.
+- Pull and push previews with incoming/outgoing commits and changed files.
 - Merge and rebase execution after explicit preview confirmation.
 - Conflict state display with abort merge, abort rebase, and continue rebase actions.
 - Operation queue with live Git command logs for long-running operations.
@@ -73,6 +74,7 @@ These items are already implemented on `main`:
 - Provider CI/check/pipeline status for listed PRs and MRs.
 - External PR/MR and CI/pipeline links through the system opener.
 - Merge and rebase previews with source/target branch, planned command, commits, changed files, and likely conflict files.
+- Pull and push previews with incoming/outgoing commits and changed files.
 - Merge and rebase execution after explicit preview confirmation.
 - Conflict state display with abort merge, abort rebase, and continue rebase actions.
 - Operation queue with live Git command logs for long-running operations.
@@ -99,7 +101,7 @@ Goal: turn the current shell into the first useful desktop Git client.
 - Done: show operation result/error details and command output for each Git action.
 - Done: live progress logs for long-running Git operations.
 
-Recommended next milestone: add pull and push previews, then hunk-level staging.
+Recommended next milestone: add hunk-level staging.
 
 ## P1: Daily Branch Workflows
 
@@ -139,6 +141,8 @@ Goal: make risky Git actions understandable before they run and recoverable afte
 
 - Done: add merge preview.
 - Done: add rebase preview.
+- Done: add pull preview.
+- Done: add push preview.
 - Done: show source branch, target branch, and planned command intent.
 - Done: detect likely conflict files when possible.
 - Done: execute merge only after preview and confirmation.
@@ -152,7 +156,7 @@ Goal: make risky Git actions understandable before they run and recoverable afte
 Goal: build the features that make the app clearly better than a standard Git GUI.
 
 - Add a highly readable branch graph with strong filtering.
-- Add "what will happen" previews before pull, push, merge, and rebase.
+- Done: add "what will happen" previews before pull, push, merge, and rebase.
 - Add smart commit grouping for related changes.
 - Add a multi-repository workspace.
 - Add a repository health panel with dirty state, ahead/behind counts, CI status, open PR/MR state, and last fetch time.
@@ -201,4 +205,5 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 13. Done: merge and rebase preview.
 14. Done: conflict display and recovery.
 15. Done: live operation queue with logs.
-16. Next: pull and push previews.
+16. Done: pull and push previews.
+17. Next: hunk-level staging.

@@ -29,6 +29,7 @@ Implemented on `main`:
 - Commit details with body, changed files, and patch text.
 - History filtering by subject, author, oid, and refs.
 - Merge and rebase previews with source/target branch, planned command, commits, changed files, and likely conflict files.
+- Pull and push previews with incoming/outgoing commits and changed files.
 - Merge and rebase execution after explicit preview confirmation.
 - Conflict state display with abort merge, abort rebase, and continue rebase actions.
 - Operation queue with live Git command logs for long-running operations.
@@ -47,7 +48,6 @@ Not implemented yet:
 
 - Hunk-level staging.
 - Full PR/MR review and inline commenting.
-- Pull and push previews.
 
 See [docs/roadmap.md](docs/roadmap.md) for the active roadmap.
 
@@ -140,7 +140,6 @@ docs/
 
 ## Next Milestone
 
-The next milestone is safe complex operations:
+The next milestone is focused staging:
 
-- Add previews before pull and push.
 - Add hunk-level staging for supported text diffs.

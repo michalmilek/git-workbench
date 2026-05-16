@@ -117,7 +117,7 @@ export type GitOperationResult = {
   stderr: string;
 };
 
-export type OperationPreviewKind = "merge" | "rebase";
+export type OperationPreviewKind = "merge" | "rebase" | "pull" | "push";
 
 export type OperationPreviewCommit = {
   oid: string;

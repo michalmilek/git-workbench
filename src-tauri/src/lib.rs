@@ -142,6 +142,16 @@ fn preview_rebase(
 }
 
 #[tauri::command]
+fn preview_pull(repository_path: &str) -> Result<OperationPreview, OperationError> {
+    git::operation_preview::preview_pull(std::path::Path::new(repository_path))
+}
+
+#[tauri::command]
+fn preview_push(repository_path: &str) -> Result<OperationPreview, OperationError> {
+    git::operation_preview::preview_push(std::path::Path::new(repository_path))
+}
+
+#[tauri::command]
 fn get_conflict_state(repository_path: &str) -> Result<ConflictState, OperationError> {
     git::conflict::read_conflict_state(std::path::Path::new(repository_path))
 }
@@ -300,6 +310,8 @@ pub fn run() -> tauri::Result<()> {
             list_provider_remotes,
             preview_merge,
             preview_rebase,
+            preview_pull,
+            preview_push,
             get_conflict_state,
             run_merge,
             run_rebase,

@@ -69,8 +69,10 @@ import {
   listProviderWorkItems,
   listStashes,
   popStash,
+  previewPull,
   previewMerge,
   previewRebase,
+  previewPush,
   pullRepository,
   pushRepository,
   runMerge,
@@ -137,6 +139,7 @@ type OperationFeedback =
   | null;
 
 type SyncAction = "fetch" | "pull" | "push";
+type SyncPreviewAction = "preview-pull" | "preview-push";
 type BranchAction = "checkout-branch" | "create-branch" | "delete-branch" | "preview-merge" | "preview-rebase";
 type StashAction = "create-stash" | "apply-stash" | "pop-stash" | "drop-stash";
 type OperationExecutionAction = "run-merge" | "run-rebase" | "abort-merge" | "abort-rebase" | "continue-rebase";
@@ -149,6 +152,7 @@ type BusyAction =
   | "unstage"
   | "commit"
   | SyncAction
+  | SyncPreviewAction
   | BranchAction
   | StashAction
   | OperationExecutionAction
@@ -692,6 +696,39 @@ export function App() {
     });
   }
 
+  async function previewSyncOperation(action: "pull" | "push") {
+    if (repositoryPath === null) {
+      return;
+    }
+
+    const requestId = createOperationPreviewRequest();
+    const busyPreviewAction = action === "pull" ? "preview-pull" : "preview-push";
+    const operation = action === "pull" ? "Preview pull" : "Preview push";
+    setOperationPreview(null);
+    setBusyAction(busyPreviewAction);
+
+    try {
+      const preview = action === "pull" ? await previewPull(repositoryPath) : await previewPush(repositoryPath);
+      if (isCurrentOperationPreviewRequest(requestId)) {
+        setOperationPreview(preview);
+        const result = operationPreviewResult(preview);
+        setFeedback({ kind: "result", result });
+        recordOperationResult(operation, result);
+      }
+    } catch (error) {
+      if (isCurrentOperationPreviewRequest(requestId)) {
+        const operationError = describeOperationError(error);
+        setOperationPreview(null);
+        setFeedback({ kind: "error", error: operationError });
+        recordOperationError(operation, operationError);
+      }
+    } finally {
+      if (isCurrentOperationPreviewRequest(requestId)) {
+        setBusyAction(null);
+      }
+    }
+  }
+
   async function checkoutRepositoryBranch(branchName: string) {
     if (repositoryPath === null) {
       return;
@@ -812,8 +849,8 @@ export function App() {
       return;
     }
 
-    const action = preview.kind === "merge" ? "run-merge" : "run-rebase";
-    const operation = preview.kind === "merge" ? "Run merge" : "Run rebase";
+    const action = previewRunBusyAction(preview);
+    const operation = previewRunOperationLabel(preview);
     await runQueuedGitOperation({
       action,
       command: preview.command,
@@ -1806,8 +1843,9 @@ export function App() {
               <IconCloudUpload aria-hidden="true" className="size-4 shrink-0" />
               Sync
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <Button
+                className="col-span-2"
                 disabled={busyAction !== null || repositoryPath === null}
                 onClick={() => void runQueuedRepositoryOperation("fetch")}
                 size="sm"
@@ -1829,6 +1867,16 @@ export function App() {
               </Button>
               <Button
                 disabled={busyAction !== null || repositoryPath === null}
+                onClick={() => void previewSyncOperation("pull")}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <IconFileDiff aria-hidden="true" data-icon="inline-start" />
+                Pull preview
+              </Button>
+              <Button
+                disabled={busyAction !== null || repositoryPath === null}
                 onClick={() => void runQueuedRepositoryOperation("push")}
                 size="sm"
                 type="button"
@@ -1836,6 +1884,16 @@ export function App() {
               >
                 <IconUpload aria-hidden="true" data-icon="inline-start" />
                 Push
+              </Button>
+              <Button
+                disabled={busyAction !== null || repositoryPath === null}
+                onClick={() => void previewSyncOperation("push")}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <IconFileDiff aria-hidden="true" data-icon="inline-start" />
+                Push preview
               </Button>
             </div>
           </div>
@@ -2124,8 +2182,44 @@ function runPreviewedCommand(preview: OperationPreview, repositoryPath: string, 
     return runMerge(args);
   }
 
+  if (preview.kind === "pull") {
+    return pullRepository({ operationId, repositoryPath });
+  }
+
+  if (preview.kind === "push") {
+    return pushRepository({ operationId, repositoryPath });
+  }
+
   const args = { operationId, repositoryPath, targetBranch: preview.targetBranch };
   return runRebase(args);
+}
+
+function previewRunBusyAction(preview: OperationPreview): Exclude<BusyAction, null> {
+  if (preview.kind === "merge") {
+    return "run-merge";
+  }
+
+  if (preview.kind === "rebase") {
+    return "run-rebase";
+  }
+
+  return preview.kind;
+}
+
+function previewRunOperationLabel(preview: OperationPreview): string {
+  if (preview.kind === "merge") {
+    return "Run merge";
+  }
+
+  if (preview.kind === "rebase") {
+    return "Run rebase";
+  }
+
+  if (preview.kind === "pull") {
+    return "Pull";
+  }
+
+  return "Push";
 }
 
 function operationPreviewResult(preview: OperationPreview): GitOperationResult {
@@ -2472,12 +2566,8 @@ function OperationPreviewPanel({
             type="button"
             variant="default"
           >
-            {preview.kind === "merge" ? (
-              <IconGitMerge aria-hidden="true" data-icon="inline-start" />
-            ) : (
-              <IconGitCompare aria-hidden="true" data-icon="inline-start" />
-            )}
-            {busyAction === "run-merge" || busyAction === "run-rebase" ? `Running ${preview.kind}` : `Run ${preview.kind}`}
+            <OperationPreviewRunIcon kind={preview.kind} />
+            {isRunningOperationPreview(preview, busyAction) ? `Running ${preview.kind}` : operationPreviewRunButtonLabel(preview)}
           </Button>
 
           <PreviewList label="Commits" values={preview.commits.map((commit) => `${commit.shortOid} ${commit.subject}`)} />
@@ -2582,6 +2672,38 @@ function ConflictStatePanel({
       )}
     </div>
   );
+}
+
+function OperationPreviewRunIcon({ kind }: { kind: OperationPreview["kind"] }) {
+  if (kind === "merge") {
+    return <IconGitMerge aria-hidden="true" data-icon="inline-start" />;
+  }
+
+  if (kind === "pull") {
+    return <IconDownload aria-hidden="true" data-icon="inline-start" />;
+  }
+
+  if (kind === "push") {
+    return <IconUpload aria-hidden="true" data-icon="inline-start" />;
+  }
+
+  return <IconGitCompare aria-hidden="true" data-icon="inline-start" />;
+}
+
+function isRunningOperationPreview(preview: OperationPreview, busyAction: BusyAction): boolean {
+  return busyAction === previewRunBusyAction(preview);
+}
+
+function operationPreviewRunButtonLabel(preview: OperationPreview): string {
+  if (preview.kind === "pull") {
+    return "Run pull";
+  }
+
+  if (preview.kind === "push") {
+    return "Run push";
+  }
+
+  return `Run ${preview.kind}`;
 }
 
 function PreviewList({ label, values }: { label: string; values: string[] }) {
