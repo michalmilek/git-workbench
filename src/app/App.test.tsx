@@ -8,6 +8,7 @@ import type {
   BranchList,
   ConflictState,
   CommitDetails,
+  CommitSummary,
   FileDiff,
   GitOperationResult,
   ProviderAccount,
@@ -15,21 +16,24 @@ import type {
   ProviderWorkItem,
   ProviderWorkItemList,
   RepositoryStatus,
-  StashEntry
+  StashEntry,
+  StatusFile
 } from "@/features/repository/repository-types";
 
 const repositoryMocks = vi.hoisted(() => ({
   getCommitDetails: vi.fn<() => Promise<CommitDetails>>(),
   getConflictState: vi.fn<() => Promise<ConflictState>>(),
-  getFileDiff: vi.fn<() => Promise<FileDiff>>(),
+  getFileDiff: vi.fn<(args: { filePath: string; repositoryPath: string; staged: boolean }) => Promise<FileDiff>>(),
   getRepositoryStatus: vi.fn<() => Promise<RepositoryStatus>>(),
   listBranches: vi.fn<() => Promise<BranchList>>(),
-  listCommitHistory: vi.fn<() => Promise<[]>>(),
+  listCommitHistory: vi.fn<() => Promise<CommitSummary[]>>(),
   listProviderAccounts: vi.fn<() => Promise<ProviderAccount[]>>(),
   listProviderRemotes: vi.fn<() => Promise<ProviderRemoteList>>(),
   listProviderWorkItems: vi.fn<() => Promise<ProviderWorkItemList>>(),
   listStashes: vi.fn<() => Promise<StashEntry[]>>(),
-  pullRepository: vi.fn<() => Promise<GitOperationResult>>()
+  pullRepository: vi.fn<() => Promise<GitOperationResult>>(),
+  stageFile: vi.fn<(args: { filePath: string; repositoryPath: string }) => Promise<GitOperationResult>>(),
+  unstageFile: vi.fn<(args: { filePath: string; repositoryPath: string }) => Promise<GitOperationResult>>()
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -172,6 +176,115 @@ describe("App repository health", () => {
     expect(companyProfilesText(container)).toContain("gitlab.company.test");
     expect(companyProfilesText(container)).toContain("Use hardware key");
   });
+
+  test("switches views with keyboard shortcuts", async () => {
+    await openRepository(container, "/repo");
+
+    await pressKey("2", { ctrlKey: true });
+
+    expect(container.textContent).toContain("0 commits");
+  });
+
+  test("focuses the history filter with slash in the history view", async () => {
+    await openRepository(container, "/repo");
+    await pressKey("2", { ctrlKey: true });
+
+    await pressKey("/");
+
+    expect(document.activeElement).toBe(requiredElement(container.querySelector("#history-filter")));
+  });
+
+  test("moves the changed-file selection with j and loads the next diff", async () => {
+    repositoryMocks.getRepositoryStatus.mockResolvedValue(
+      repositoryStatus({
+        files: [
+          statusFile({ path: "src/App.tsx" }),
+          statusFile({ path: "src/keyboard.ts" })
+        ]
+      })
+    );
+
+    await openRepository(container, "/repo");
+    repositoryMocks.getFileDiff.mockClear();
+
+    await pressKey("j");
+
+    expect(repositoryMocks.getFileDiff).toHaveBeenCalledWith({
+      filePath: "src/keyboard.ts",
+      repositoryPath: "/repo",
+      staged: false
+    });
+    expect(container.textContent).toContain("src/keyboard.ts");
+  });
+
+  test("stages and unstages the selected file with keyboard shortcuts", async () => {
+    repositoryMocks.getRepositoryStatus.mockResolvedValue(
+      repositoryStatus({
+        files: [statusFile({ indexStatus: "modified", path: "src/App.tsx", worktreeStatus: "modified" })]
+      })
+    );
+
+    await openRepository(container, "/repo");
+    await pressKey("s");
+
+    expect(repositoryMocks.stageFile).toHaveBeenCalledWith({
+      filePath: "src/App.tsx",
+      repositoryPath: "/repo"
+    });
+
+    await pressKey("u");
+
+    expect(repositoryMocks.unstageFile).toHaveBeenCalledWith({
+      filePath: "src/App.tsx",
+      repositoryPath: "/repo"
+    });
+  });
+
+  test("refreshes the active repository with the r shortcut", async () => {
+    await openRepository(container, "/repo");
+    repositoryMocks.getRepositoryStatus.mockClear();
+
+    await pressKey("r");
+
+    expect(repositoryMocks.getRepositoryStatus).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Last refreshJust now");
+  });
+
+  test("moves commit and stash selection with keyboard shortcuts", async () => {
+    repositoryMocks.listCommitHistory.mockResolvedValue([
+      commitSummary({ oid: "commit-one", shortOid: "commit-on", subject: "First commit" }),
+      commitSummary({ oid: "commit-two", shortOid: "commit-tw", subject: "Second commit" })
+    ]);
+    repositoryMocks.listStashes.mockResolvedValue([
+      stashEntry({ index: 0, message: "first stash", selector: "stash@{0}" }),
+      stashEntry({ index: 1, message: "second stash", selector: "stash@{1}" })
+    ]);
+
+    await openRepository(container, "/repo");
+    await pressKey("2", { ctrlKey: true });
+    repositoryMocks.getCommitDetails.mockClear();
+
+    await pressKey("j");
+
+    expect(repositoryMocks.getCommitDetails).toHaveBeenCalledWith({
+      commitOid: "commit-two",
+      repositoryPath: "/repo"
+    });
+
+    await pressKey("3", { ctrlKey: true });
+    await pressKey("j");
+
+    expect(container.textContent).toContain("second stash");
+  });
+
+  test("ignores shortcuts while typing in text fields", async () => {
+    await openRepository(container, "/repo");
+    repositoryMocks.getRepositoryStatus.mockClear();
+
+    await pressKeyFromElement(requiredElement<HTMLInputElement>(container.querySelector("input[placeholder='Commit summary']")), "r");
+
+    expect(repositoryMocks.getRepositoryStatus).not.toHaveBeenCalled();
+  });
 });
 
 function installMemoryLocalStorage() {
@@ -208,15 +321,17 @@ function createMemoryStorage(): Storage {
 function resetRepositoryMocks() {
   repositoryMocks.getRepositoryStatus.mockResolvedValue(repositoryStatus());
   repositoryMocks.getConflictState.mockResolvedValue(noConflictState());
-  repositoryMocks.getFileDiff.mockResolvedValue({ isBinary: false, path: "src/App.tsx", text: "" });
+  repositoryMocks.getFileDiff.mockImplementation(async ({ filePath }) => ({ isBinary: false, path: filePath, text: filePath }));
   repositoryMocks.listBranches.mockResolvedValue({ branches: [] });
   repositoryMocks.listCommitHistory.mockResolvedValue([]);
-  repositoryMocks.getCommitDetails.mockRejectedValue(new Error("commit details are not used in this test"));
+  repositoryMocks.getCommitDetails.mockResolvedValue(commitDetails());
   repositoryMocks.listProviderAccounts.mockResolvedValue([]);
   repositoryMocks.listProviderRemotes.mockResolvedValue({ remotes: [] });
   repositoryMocks.listProviderWorkItems.mockResolvedValue({ items: [], message: "No open provider work items found." });
   repositoryMocks.listStashes.mockResolvedValue([]);
   repositoryMocks.pullRepository.mockResolvedValue({ command: "git pull", stderr: "", stdout: "" });
+  repositoryMocks.stageFile.mockResolvedValue({ command: "git add -- src/App.tsx", stderr: "", stdout: "staged" });
+  repositoryMocks.unstageFile.mockResolvedValue({ command: "git restore --staged -- src/App.tsx", stderr: "", stdout: "unstaged" });
 }
 
 async function openRepository(container: HTMLElement, path: string) {
@@ -244,6 +359,22 @@ async function clickCheckbox(container: HTMLElement, label: string) {
   await act(async () => {
     const checkbox = requiredElement<HTMLInputElement>(container.querySelector(`input[aria-label="${label}"]`));
     checkbox.click();
+  });
+
+  await flushReactWork();
+}
+
+async function pressKey(key: string, init: KeyboardEventInit = {}) {
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key, ...init }));
+  });
+
+  await flushReactWork();
+}
+
+async function pressKeyFromElement(element: HTMLElement, key: string, init: KeyboardEventInit = {}) {
+  await act(async () => {
+    element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key, ...init }));
   });
 
   await flushReactWork();
@@ -304,13 +435,24 @@ function requiredElement<T extends Element>(element: T | null): T {
   return element;
 }
 
-function repositoryStatus(): RepositoryStatus {
+function repositoryStatus(overrides: Partial<RepositoryStatus> = {}): RepositoryStatus {
   return {
     ahead: 0,
     behind: 0,
     branch: "main",
     files: [],
-    upstream: "origin/main"
+    upstream: "origin/main",
+    ...overrides
+  };
+}
+
+function statusFile(overrides: Partial<StatusFile> = {}): StatusFile {
+  return {
+    conflict: false,
+    indexStatus: "unmodified",
+    path: "src/App.tsx",
+    worktreeStatus: "modified",
+    ...overrides
   };
 }
 
@@ -340,6 +482,38 @@ function providerWorkItem(overrides: Partial<ProviderWorkItem> = {}): ProviderWo
     targetBranch: "main",
     title: "Add provider work panel",
     webUrl: "https://github.com/openai/codex/pull/42",
+    ...overrides
+  };
+}
+
+function commitSummary(overrides: Partial<CommitSummary> = {}): CommitSummary {
+  return {
+    authorEmail: "alex@example.com",
+    authorName: "Alex Rivera",
+    authoredAt: "2026-05-16T08:00:00.000Z",
+    oid: "commit-one",
+    parents: [],
+    refs: [],
+    shortOid: "commit-o",
+    subject: "Initial commit",
+    ...overrides
+  };
+}
+
+function commitDetails(): CommitDetails {
+  return {
+    commit: commitSummary(),
+    body: "",
+    diffText: "",
+    files: []
+  };
+}
+
+function stashEntry(overrides: Partial<StashEntry> = {}): StashEntry {
+  return {
+    index: 0,
+    message: "first stash",
+    selector: "stash@{0}",
     ...overrides
   };
 }

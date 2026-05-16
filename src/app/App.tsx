@@ -68,6 +68,12 @@ import {
   type OperationQueueEntry,
   type OperationQueueStatus
 } from "@/features/repository/operation-queue";
+import {
+  resolveKeyboardShortcut,
+  type KeyboardShortcutAction,
+  type KeyboardShortcutInput,
+  type KeyboardShortcutTarget
+} from "@/features/repository/keyboard-shortcuts";
 import { trustedProviderUrl } from "@/features/repository/provider-links";
 import {
   buildProviderWorkItemDetails,
@@ -304,6 +310,7 @@ export function App() {
   const operationPreviewRequestId = useRef(0);
   const commandLogId = useRef(0);
   const operationQueueId = useRef(0);
+  const historyFilterInputRef = useRef<HTMLInputElement | null>(null);
 
   const summary = useMemo(() => (status === null ? null : summarizeRepositoryStatus(status)), [status]);
   const commitGroupSuggestions = useMemo(() => buildCommitGroupSuggestions(status?.files ?? []), [status?.files]);
@@ -363,6 +370,22 @@ export function App() {
   useEffect(() => {
     setWorkspaceBatchSelectedPaths((selectedPaths) => reconcileWorkspaceBatchSelection(workspaceRepositories, selectedPaths));
   }, [workspaceRepositories]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const action = resolveKeyboardShortcut(keyboardShortcutInputFromEvent(event));
+      if (action === null || !handleKeyboardShortcut(action)) {
+        return;
+      }
+
+      event.preventDefault();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  });
 
   useEffect(() => {
     const requestId = providerAccountsRequestId.current + 1;
@@ -1436,6 +1459,148 @@ export function App() {
     setWorkspaceBatchSelectedPaths((selectedPaths) => toggleWorkspaceBatchPath(selectedPaths, path));
   }
 
+  function handleKeyboardShortcut(action: KeyboardShortcutAction): boolean {
+    if (action === "view-changes") {
+      setActiveView("changes");
+      return true;
+    }
+    if (action === "view-history") {
+      setActiveView("history");
+      return true;
+    }
+    if (action === "view-stashes") {
+      setActiveView("stashes");
+      return true;
+    }
+    if (action === "select-next") {
+      return moveActiveSelection(1);
+    }
+    if (action === "select-previous") {
+      return moveActiveSelection(-1);
+    }
+    if (action === "stage-selected") {
+      return stageSelectedFileFromShortcut();
+    }
+    if (action === "unstage-selected") {
+      return unstageSelectedFileFromShortcut();
+    }
+    if (action === "refresh") {
+      return refreshRepositoryFromShortcut();
+    }
+    if (action === "focus-history-filter") {
+      return focusHistoryFilterFromShortcut();
+    }
+
+    return false;
+  }
+
+  function moveActiveSelection(direction: 1 | -1): boolean {
+    if (activeView === "changes") {
+      return moveChangedFileSelection(direction);
+    }
+    if (activeView === "history") {
+      return moveCommitSelection(direction);
+    }
+
+    return moveStashSelection(direction);
+  }
+
+  function moveChangedFileSelection(direction: 1 | -1): boolean {
+    if (status === null || status.files.length === 0) {
+      return false;
+    }
+
+    const nextIndex = offsetSelectionIndex(
+      status.files.length,
+      status.files.findIndex((file) => file.path === selectedFilePath),
+      direction
+    );
+    const nextFile = status.files[nextIndex];
+
+    if (nextFile === undefined) {
+      return false;
+    }
+
+    void selectFile(nextFile);
+    return true;
+  }
+
+  function moveCommitSelection(direction: 1 | -1): boolean {
+    if (filteredHistory.length === 0) {
+      return false;
+    }
+
+    const nextIndex = offsetSelectionIndex(
+      filteredHistory.length,
+      filteredHistory.findIndex((commit) => commit.oid === selectedCommitOid),
+      direction
+    );
+    const nextCommit = filteredHistory[nextIndex];
+
+    if (nextCommit === undefined) {
+      return false;
+    }
+
+    void selectCommit(nextCommit);
+    return true;
+  }
+
+  function moveStashSelection(direction: 1 | -1): boolean {
+    if (stashes.length === 0) {
+      return false;
+    }
+
+    const nextIndex = offsetSelectionIndex(
+      stashes.length,
+      stashes.findIndex((stash) => stash.selector === selectedStashRef),
+      direction
+    );
+    const nextStash = stashes[nextIndex];
+
+    if (nextStash === undefined) {
+      return false;
+    }
+
+    setSelectedStashRef(nextStash.selector);
+    return true;
+  }
+
+  function stageSelectedFileFromShortcut(): boolean {
+    if (activeView !== "changes" || busyAction !== null || selectedFile === null || !selectedFileHasWorktreeChanges) {
+      return false;
+    }
+
+    void stageSelectedFile();
+    return true;
+  }
+
+  function unstageSelectedFileFromShortcut(): boolean {
+    if (activeView !== "changes" || busyAction !== null || selectedFile === null || !selectedFileHasStagedChanges) {
+      return false;
+    }
+
+    void unstageSelectedFile();
+    return true;
+  }
+
+  function refreshRepositoryFromShortcut(): boolean {
+    if (busyAction !== null || (repositoryPath === null && repositoryPathInput.trim().length === 0)) {
+      return false;
+    }
+
+    void refreshRepository();
+    return true;
+  }
+
+  function focusHistoryFilterFromShortcut(): boolean {
+    if (activeView !== "history" || historyFilterInputRef.current === null) {
+      return false;
+    }
+
+    historyFilterInputRef.current.focus();
+    return true;
+  }
+
   function saveCurrentCompanyProfile() {
     const profile = normalizeCompanyProfileInput(
       {
@@ -2015,6 +2180,7 @@ export function App() {
                         setHistoryFilter(event.target.value);
                       }}
                       placeholder="Filter subject, author, hash, refs"
+                      ref={historyFilterInputRef}
                       value={historyFilter}
                     />
                     <Button
@@ -2567,6 +2733,29 @@ function readCompanyProfiles(): CompanyProfile[] {
   return parseCompanyProfiles(localStorage.getItem(COMPANY_PROFILES_STORAGE_KEY));
 }
 
+function keyboardShortcutInputFromEvent(event: KeyboardEvent): KeyboardShortcutInput {
+  return {
+    altKey: event.altKey,
+    ctrlKey: event.ctrlKey,
+    key: event.key,
+    metaKey: event.metaKey,
+    shiftKey: event.shiftKey,
+    target: keyboardShortcutTargetFromEventTarget(event.target)
+  };
+}
+
+function keyboardShortcutTargetFromEventTarget(target: EventTarget | null): KeyboardShortcutTarget | null {
+  if (!(target instanceof Element)) {
+    return null;
+  }
+
+  return {
+    isContentEditable: target instanceof HTMLElement && target.isContentEditable,
+    role: target.getAttribute("role"),
+    tagName: target.tagName
+  };
+}
+
 function getSelectedFile(status: RepositoryStatus | null, selectedFilePath: string | null): StatusFile | null {
   if (status === null || selectedFilePath === null) {
     return null;
@@ -2600,6 +2789,14 @@ function chooseSelectedStashRef(stashes: StashEntry[], requestedStashRef: string
   }
 
   return stashes[0]?.selector ?? null;
+}
+
+function offsetSelectionIndex(length: number, currentIndex: number, direction: 1 | -1): number {
+  if (currentIndex === -1) {
+    return direction === 1 ? 0 : length - 1;
+  }
+
+  return (currentIndex + direction + length) % length;
 }
 
 function resolveSelectedOperationBranch(branches: BranchInfo[], requestedBranch: string): string {

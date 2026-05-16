@@ -44,6 +44,7 @@ The repository already includes:
 - Workspace batch operations for fetch all, pull selected, and push selected.
 - Repository health panel with dirty, sync, PR/MR, CI, and last-refresh summaries.
 - Company setup profiles for matching self-hosted GitLab remotes to VPN, SSH, and setup notes.
+- Keyboard-first navigation for view switching, list movement, refresh, staging, unstaging, and history filter focus.
 - Persistent command log stored in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
 
@@ -91,6 +92,7 @@ These items are already implemented on `main`:
 - Workspace batch operations for fetch all, pull selected, and push selected.
 - Repository health panel with dirty, sync, PR/MR, CI, and last-refresh summaries.
 - Company setup profiles for GitLab, VPN, and SSH setup metadata.
+- Keyboard-first navigation for repeated repository workflows.
 - Latest operation result/error display with command, stdout, and stderr.
 - Persistent command log stored in localStorage.
 - Frontend tests for repository summaries, recents, commit validation, and Tauri invoke payloads.
@@ -114,7 +116,7 @@ Goal: turn the current shell into the first useful desktop Git client.
 - Done: show operation result/error details and command output for each Git action.
 - Done: live progress logs for long-running Git operations.
 
-Recommended next milestone: add keyboard-first navigation for repeated workflows.
+Recommended next milestone: plan full PR/MR review and inline commenting.
 
 ## P1: Daily Branch Workflows
 
@@ -177,11 +179,12 @@ Goal: build the features that make the app clearly better than a standard Git GU
 - Done: add provider-neutral PR/MR views across GitHub and GitLab.
 - Done: add batch operations: fetch all, pull selected, push selected.
 - Done: add profiles for company GitLab, VPN, and SSH setups.
-- Next: add keyboard-first navigation for repeated workflows.
+- Done: add keyboard-first navigation for repeated workflows.
+- Next: plan full PR/MR review and inline commenting.
 
 ## Later Or Explicitly Out Of Scope For Now
 
-These should not be prioritized until the core Git workflow is solid:
+These should wait for explicit provider-write design:
 
 - Full PR/MR review and inline commenting.
 - Replacing the user's Git credential manager.
@@ -228,4 +231,5 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 22. Done: provider-neutral PR/MR views.
 23. Done: batch repository operations.
 24. Done: company GitLab, VPN, and SSH setup profiles.
-25. Next: keyboard-first navigation.
+25. Done: keyboard-first navigation.
+26. Next: full PR/MR review planning.
