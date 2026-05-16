@@ -55,6 +55,7 @@ Implemented on `main`:
 Not implemented yet:
 
 - Full PR/MR review and inline commenting.
+- Review approvals, requested changes, and thread resolution.
 
 See [docs/roadmap.md](docs/roadmap.md) for the active roadmap.
 
@@ -147,6 +148,6 @@ docs/
 
 ## Next Milestone
 
-The next milestone is full PR/MR review planning:
+The next milestone is PR/MR review implementation:
 
-- Design provider-neutral review, inline commenting, and provider write-action boundaries before implementation.
+- Build read-only review details first, then local drafts, then explicit provider comment submission.

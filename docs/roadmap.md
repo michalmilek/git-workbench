@@ -116,7 +116,7 @@ Goal: turn the current shell into the first useful desktop Git client.
 - Done: show operation result/error details and command output for each Git action.
 - Done: live progress logs for long-running Git operations.
 
-Recommended next milestone: plan full PR/MR review and inline commenting.
+Recommended next milestone: implement PR/MR review details and safe comment submission.
 
 ## P1: Daily Branch Workflows
 
@@ -180,13 +180,14 @@ Goal: build the features that make the app clearly better than a standard Git GU
 - Done: add batch operations: fetch all, pull selected, push selected.
 - Done: add profiles for company GitLab, VPN, and SSH setups.
 - Done: add keyboard-first navigation for repeated workflows.
-- Next: plan full PR/MR review and inline commenting.
+- Done: plan full PR/MR review and inline commenting.
+- Next: implement PR/MR review details and safe comment submission.
 
 ## Later Or Explicitly Out Of Scope For Now
 
-These should wait for explicit provider-write design:
+These should wait until review/commenting support lands:
 
-- Full PR/MR review and inline commenting.
+- Review approvals, requested changes, and thread resolution.
 - Replacing the user's Git credential manager.
 - Running real merge and rebase before conflict display and recovery are designed.
 - Long-term local analytics or repository indexing database.
@@ -232,4 +233,5 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 23. Done: batch repository operations.
 24. Done: company GitLab, VPN, and SSH setup profiles.
 25. Done: keyboard-first navigation.
-26. Next: full PR/MR review planning.
+26. Done: full PR/MR review planning.
+27. Next: PR/MR review implementation.
