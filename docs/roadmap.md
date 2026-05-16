@@ -40,6 +40,7 @@ The repository already includes:
 - Operation queue with live Git command logs for long-running operations.
 - Smart commit grouping suggestions with conventional summaries, commit bodies, counts, and group staging.
 - Multi-repository workspace list with persisted repository snapshots and active repository switching.
+- Repository health panel with dirty, sync, PR/MR, CI, and last-refresh summaries.
 - Persistent command log stored in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
 
@@ -83,6 +84,7 @@ These items are already implemented on `main`:
 - Operation queue with live Git command logs for long-running operations.
 - Smart commit grouping suggestions with conventional summaries, commit bodies, staged/worktree/conflict counts, and group staging that skips unresolved conflicts.
 - Multi-repository workspace list with persisted repository snapshots, branch/sync/change summaries, and active repository switching.
+- Repository health panel with dirty, sync, PR/MR, CI, and last-refresh summaries.
 - Latest operation result/error display with command, stdout, and stderr.
 - Persistent command log stored in localStorage.
 - Frontend tests for repository summaries, recents, commit validation, and Tauri invoke payloads.
@@ -106,7 +108,7 @@ Goal: turn the current shell into the first useful desktop Git client.
 - Done: show operation result/error details and command output for each Git action.
 - Done: live progress logs for long-running Git operations.
 
-Recommended next milestone: add a repository health panel.
+Recommended next milestone: add provider-neutral PR/MR views.
 
 ## P1: Daily Branch Workflows
 
@@ -164,8 +166,8 @@ Goal: build the features that make the app clearly better than a standard Git GU
 - Done: add "what will happen" previews before pull, push, merge, and rebase.
 - Done: add smart commit grouping for related changes.
 - Done: add a multi-repository workspace.
-- Next: add a repository health panel with dirty state, ahead/behind counts, CI status, open PR/MR state, and last refresh time.
-- Add provider-neutral PR/MR views across GitHub and GitLab.
+- Done: add a repository health panel with dirty state, ahead/behind counts, CI status, open PR/MR state, and last refresh time.
+- Next: add provider-neutral PR/MR views across GitHub and GitLab.
 - Add batch operations: fetch all, pull selected, push selected.
 - Add profiles for company GitLab, VPN, and SSH setups.
 - Add keyboard-first navigation for repeated workflows.
@@ -215,4 +217,5 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 18. Done: branch graph readability and stronger history filtering.
 19. Done: smart commit grouping.
 20. Done: multi-repository workspace.
-21. Next: repository health panel.
+21. Done: repository health panel.
+22. Next: provider-neutral PR/MR views.

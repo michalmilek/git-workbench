@@ -36,6 +36,7 @@ Implemented on `main`:
 - Operation queue with live Git command logs for long-running operations.
 - Provider remote detection for GitHub, GitLab.com, and self-hosted GitLab-style hosts.
 - Multi-repository workspace list with persisted repository snapshots and active repository switching.
+- Repository health panel with dirty, sync, PR/MR, CI, and last-refresh summaries.
 - Provider account configuration with non-secret metadata in app config.
 - Provider token storage in the OS keychain.
 - Provider API connection testing for configured accounts.
@@ -142,6 +143,6 @@ docs/
 
 ## Next Milestone
 
-The next milestone is a repository health panel:
+The next milestone is provider-neutral PR/MR views:
 
-- Summarize dirty state, ahead/behind counts, CI status, PR/MR state, and last refresh time.
+- Show richer GitHub/GitLab work item details in one common review surface.
