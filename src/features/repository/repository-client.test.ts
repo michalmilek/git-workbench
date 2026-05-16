@@ -10,6 +10,7 @@ import type {
   ProviderAccount,
   ProviderConnectionResult,
   ProviderReviewDetails,
+  ProviderReviewSubmitResult,
   ProviderWorkItemList,
   ProviderRemoteList,
   RepositoryStatus,
@@ -41,7 +42,8 @@ describe("createRepositoryClient", () => {
         previewPush: expect.any(Function),
         previewRebase: expect.any(Function),
         runMerge: expect.any(Function),
-        runRebase: expect.any(Function)
+        runRebase: expect.any(Function),
+        submitProviderReviewComment: expect.any(Function)
       })
     );
 
@@ -50,6 +52,29 @@ describe("createRepositoryClient", () => {
     await client.listProviderRemotes("/repo");
     await client.listProviderWorkItems("/repo");
     await client.getProviderReviewDetails({ accountId: "account-1", itemId: "github:origin:42", repositoryPath: "/repo" });
+    await client.submitProviderReviewComment({
+      accountId: "account-1",
+      body: "Please adjust this line.",
+      itemId: "github:origin:42",
+      repositoryPath: "/repo",
+      target: {
+        kind: "inline",
+        path: "src/app/App.tsx",
+        position: {
+          baseSha: "base-sha",
+          headSha: "head-sha",
+          line: 42,
+          newLine: 42,
+          oldLine: null,
+          oldPath: null,
+          path: "src/app/App.tsx",
+          positionType: "text",
+          providerKind: "github",
+          side: "RIGHT",
+          startSha: "start-sha"
+        }
+      }
+    });
     await client.getFileDiff({ filePath: "src/App.tsx", repositoryPath: "/repo", staged: true });
     await client.stageFile({ filePath: "src/App.tsx", repositoryPath: "/repo" });
     await client.unstageFile({ filePath: "src/App.tsx", repositoryPath: "/repo" });
@@ -99,6 +124,32 @@ describe("createRepositoryClient", () => {
       { args: { repositoryPath: "/repo" }, command: "list_provider_remotes" },
       { args: { repositoryPath: "/repo" }, command: "list_provider_work_items" },
       { args: { accountId: "account-1", itemId: "github:origin:42", repositoryPath: "/repo" }, command: "get_provider_review_details" },
+      {
+        args: {
+          accountId: "account-1",
+          body: "Please adjust this line.",
+          itemId: "github:origin:42",
+          repositoryPath: "/repo",
+          target: {
+            kind: "inline",
+            path: "src/app/App.tsx",
+            position: {
+              baseSha: "base-sha",
+              headSha: "head-sha",
+              line: 42,
+              newLine: 42,
+              oldLine: null,
+              oldPath: null,
+              path: "src/app/App.tsx",
+              positionType: "text",
+              providerKind: "github",
+              side: "RIGHT",
+              startSha: "start-sha"
+            }
+          }
+        },
+        command: "submit_provider_review_comment"
+      },
       {
         args: { filePath: "src/App.tsx", repositoryPath: "/repo", staged: true },
         command: "get_file_diff"
@@ -185,7 +236,8 @@ describe("browser repository client", () => {
         previewPush: expect.any(Function),
         previewRebase: expect.any(Function),
         runMerge: expect.any(Function),
-        runRebase: expect.any(Function)
+        runRebase: expect.any(Function),
+        submitProviderReviewComment: expect.any(Function)
       })
     );
 
@@ -276,6 +328,22 @@ describe("browser repository client", () => {
         })
       ]),
       title: "Add provider work panel"
+    });
+    await expect(
+      client.submitProviderReviewComment({
+        accountId: "account-1",
+        body: "Looks ready.",
+        itemId: "github:origin:42",
+        repositoryPath: "/repo",
+        target: {
+          kind: "topLevel"
+        }
+      })
+    ).resolves.toEqual({
+      command: "submit_provider_review_comment github:origin:42",
+      message: "Browser preview simulated provider review comment submission.",
+      providerResponseId: "browser-comment-1",
+      providerResponseUrl: "https://github.com/openai/codex/pull/42#browser-comment-1"
     });
     await expect(client.stageFile({ filePath: "src/app/App.tsx", repositoryPath: "/repo" })).resolves.toEqual({
       command: "git add -- src/app/App.tsx",
@@ -541,6 +609,7 @@ function responseForCommand(
   | ProviderRemoteList
   | ProviderWorkItemList
   | ProviderReviewDetails
+  | ProviderReviewSubmitResult
   | ProviderAccount[]
   | ProviderAccount
   | ProviderConnectionResult
@@ -602,6 +671,15 @@ function responseForCommand(
       threads: [],
       title: "Add provider work panel",
       webUrl: "https://github.com/openai/codex/pull/42"
+    });
+  }
+
+  if (command === "submit_provider_review_comment") {
+    return Promise.resolve({
+      command: "POST https://api.github.com/repos/openai/codex/pulls/42/comments",
+      message: "Submitted provider review comment.",
+      providerResponseId: "123",
+      providerResponseUrl: "https://github.com/openai/codex/pull/42#discussion_r123"
     });
   }
 

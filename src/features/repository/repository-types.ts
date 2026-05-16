@@ -157,6 +157,43 @@ export type ProviderReviewDetails = {
   message: string;
 };
 
+export type ProviderReviewDraftTarget =
+  | {
+      kind: "topLevel";
+    }
+  | {
+      kind: "inline";
+      path: string;
+      position: ProviderReviewPosition | null;
+    };
+
+export type ProviderReviewDraft = {
+  itemId: string;
+  body: string;
+  target: ProviderReviewDraftTarget;
+};
+
+export type ProviderReviewDraftPreview = {
+  body: string;
+  summary: string;
+  target: ProviderReviewDraftTarget;
+};
+
+export type ProviderReviewCommentSubmitArgs = {
+  repositoryPath: string;
+  accountId: string;
+  itemId: string;
+  body: string;
+  target: ProviderReviewDraftTarget;
+};
+
+export type ProviderReviewSubmitResult = {
+  command: string;
+  message: string;
+  providerResponseUrl: string | null;
+  providerResponseId: string | null;
+};
+
 export type ProviderConnectionResult = {
   accountId: string;
   ok: boolean;

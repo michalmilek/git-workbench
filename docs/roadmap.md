@@ -33,6 +33,8 @@ The repository already includes:
 - Provider PR/MR work item list for the active repository.
 - Provider CI/check/pipeline status for listed PRs and MRs.
 - Provider-neutral PR/MR detail surface for GitHub, GitLab.com, and self-hosted GitLab work items.
+- Local PR/MR review drafts with explicit provider payload previews.
+- Provider comment submission for top-level and inline GitHub/GitLab review comments after preview confirmation.
 - External PR/MR and CI/pipeline links through the system opener.
 - Merge and rebase previews with source/target branch, planned command, commits, changed files, and likely conflict files.
 - Pull and push previews with incoming/outgoing commits and changed files.
@@ -81,6 +83,8 @@ These items are already implemented on `main`:
 - Provider PR/MR work item list for the active repository.
 - Provider CI/check/pipeline status for listed PRs and MRs.
 - Provider-neutral PR/MR detail surface for GitHub, GitLab.com, and self-hosted GitLab work items.
+- Local PR/MR review drafts with explicit provider payload previews.
+- Provider comment submission for top-level and inline GitHub/GitLab review comments after preview confirmation.
 - External PR/MR and CI/pipeline links through the system opener.
 - Merge and rebase previews with source/target branch, planned command, commits, changed files, and likely conflict files.
 - Pull and push previews with incoming/outgoing commits and changed files.
@@ -116,7 +120,7 @@ Goal: turn the current shell into the first useful desktop Git client.
 - Done: show operation result/error details and command output for each Git action.
 - Done: live progress logs for long-running Git operations.
 
-Recommended next milestone: implement local PR/MR review drafts and safe comment submission.
+Recommended next milestone: implement review approvals, requested changes, and thread resolution.
 
 ## P1: Daily Branch Workflows
 
@@ -148,6 +152,7 @@ Goal: make GitHub, GitLab.com, and company GitLab instances first-class without 
 - Done: show PR/MR lists for the active repository.
 - Done: show CI/check/pipeline status.
 - Done: show provider-neutral PR/MR details for the active repository.
+- Done: preview and submit provider review comments.
 - Done: open PR/MR and pipeline links externally.
 - Keep push and pull using the user's existing system Git, SSH agent, credential helper, and VPN setup.
 
@@ -182,13 +187,13 @@ Goal: build the features that make the app clearly better than a standard Git GU
 - Done: add keyboard-first navigation for repeated workflows.
 - Done: plan full PR/MR review and inline commenting.
 - Done: implement read-only PR/MR review details.
-- Next: implement local review drafts and safe provider comment submission.
+- Done: implement local review drafts and safe provider comment submission.
+- Next: implement review approvals, requested changes, and thread resolution.
 
 ## Later Or Explicitly Out Of Scope For Now
 
-These should wait until review/commenting support lands:
+These should wait until review decisions are designed:
 
-- Review approvals, requested changes, and thread resolution.
 - Replacing the user's Git credential manager.
 - Running real merge and rebase before conflict display and recovery are designed.
 - Long-term local analytics or repository indexing database.
@@ -236,4 +241,5 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 25. Done: keyboard-first navigation.
 26. Done: full PR/MR review planning.
 27. Done: read-only PR/MR review details.
-28. Next: local review drafts and safe provider comment submission.
+28. Done: local review drafts and safe provider comment submission.
+29. Next: review approvals, requested changes, and thread resolution.

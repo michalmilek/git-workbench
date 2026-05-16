@@ -14,6 +14,8 @@ import type {
   ProviderAccount,
   ProviderRemoteList,
   ProviderReviewDetails,
+  ProviderReviewDraftTarget,
+  ProviderReviewSubmitResult,
   ProviderWorkItem,
   ProviderWorkItemList,
   RepositoryStatus,
@@ -35,6 +37,9 @@ const repositoryMocks = vi.hoisted(() => ({
   listStashes: vi.fn<() => Promise<StashEntry[]>>(),
   pullRepository: vi.fn<() => Promise<GitOperationResult>>(),
   stageFile: vi.fn<(args: { filePath: string; repositoryPath: string }) => Promise<GitOperationResult>>(),
+  submitProviderReviewComment: vi.fn<
+    (args: { accountId: string; body: string; itemId: string; repositoryPath: string; target: ProviderReviewDraftTarget }) => Promise<ProviderReviewSubmitResult>
+  >(),
   unstageFile: vi.fn<(args: { filePath: string; repositoryPath: string }) => Promise<GitOperationResult>>()
 }));
 
@@ -190,6 +195,88 @@ describe("App repository health", () => {
 
     expect(providerWorkItemDetailsText(container)).toContain("Add provider work panel");
     expect(providerWorkItemDetailsText(container)).toContain("review failed");
+  });
+
+  test("does not open a provider review preview for empty drafts", async () => {
+    repositoryMocks.listProviderWorkItems.mockResolvedValue({
+      items: [providerWorkItem({ id: "github:origin:42", title: "Add provider work panel" })],
+      message: "Loaded 1 provider work item."
+    });
+
+    await openRepository(container, "/repo");
+    await clickButton(container, "Preview comment");
+
+    expect(providerWorkItemDetailsText(container)).toContain("Write a comment before previewing.");
+    expect(providerWorkItemDetailsText(container)).not.toContain("Payload preview");
+  });
+
+  test("opens a provider payload preview for a valid top-level draft", async () => {
+    repositoryMocks.listProviderWorkItems.mockResolvedValue({
+      items: [providerWorkItem({ id: "github:origin:42", title: "Add provider work panel" })],
+      message: "Loaded 1 provider work item."
+    });
+
+    await openRepository(container, "/repo");
+    await setFieldValue(container, "#provider-review-draft-body", "Looks ready.");
+    await clickButton(container, "Preview comment");
+
+    expect(providerWorkItemDetailsText(container)).toContain("Payload preview");
+    expect(providerWorkItemDetailsText(container)).toContain("Top-level comment on github:origin:42");
+    expect(providerWorkItemDetailsText(container)).toContain("Looks ready.");
+  });
+
+  test("requires provider review preview before submit", async () => {
+    repositoryMocks.listProviderWorkItems.mockResolvedValue({
+      items: [providerWorkItem({ id: "github:origin:42", title: "Add provider work panel" })],
+      message: "Loaded 1 provider work item."
+    });
+
+    await openRepository(container, "/repo");
+
+    expect(findButton(container, "Submit comment").disabled).toBe(true);
+    expect(repositoryMocks.submitProviderReviewComment).not.toHaveBeenCalled();
+  });
+
+  test("submits a top-level provider review comment after preview and records output", async () => {
+    repositoryMocks.listProviderWorkItems.mockResolvedValue({
+      items: [providerWorkItem({ id: "github:origin:42", title: "Add provider work panel" })],
+      message: "Loaded 1 provider work item."
+    });
+
+    await openRepository(container, "/repo");
+    await setFieldValue(container, "#provider-review-draft-body", "Looks ready.");
+    await clickButton(container, "Preview comment");
+    await clickButton(container, "Submit comment");
+
+    expect(repositoryMocks.submitProviderReviewComment).toHaveBeenCalledWith({
+      accountId: "account-1",
+      body: "Looks ready.",
+      itemId: "github:origin:42",
+      repositoryPath: "/repo",
+      target: {
+        kind: "topLevel"
+      }
+    });
+    expect(providerWorkItemDetailsText(container)).toContain("Submitted provider review comment.");
+    expect(container.textContent).toContain("Submit provider review comment");
+    expect(container.textContent).toContain("https://github.com/openai/codex/pull/42#issuecomment-123");
+    expect(repositoryMocks.getProviderReviewDetails).toHaveBeenCalledTimes(2);
+  });
+
+  test("keeps provider review draft text when submit fails", async () => {
+    repositoryMocks.listProviderWorkItems.mockResolvedValue({
+      items: [providerWorkItem({ id: "github:origin:42", title: "Add provider work panel" })],
+      message: "Loaded 1 provider work item."
+    });
+    repositoryMocks.submitProviderReviewComment.mockRejectedValue(new Error("submit failed"));
+
+    await openRepository(container, "/repo");
+    await setFieldValue(container, "#provider-review-draft-body", "Keep this draft.");
+    await clickButton(container, "Preview comment");
+    await clickButton(container, "Submit comment");
+
+    expect(providerWorkItemDetailsText(container)).toContain("submit failed");
+    expect(requiredElement<HTMLTextAreaElement>(container.querySelector("#provider-review-draft-body")).value).toBe("Keep this draft.");
   });
 
   test("runs pull for selected workspace repositories only", async () => {
@@ -394,6 +481,12 @@ function resetRepositoryMocks() {
   repositoryMocks.listStashes.mockResolvedValue([]);
   repositoryMocks.pullRepository.mockResolvedValue({ command: "git pull", stderr: "", stdout: "" });
   repositoryMocks.stageFile.mockResolvedValue({ command: "git add -- src/App.tsx", stderr: "", stdout: "staged" });
+  repositoryMocks.submitProviderReviewComment.mockResolvedValue({
+    command: "POST https://api.github.com/repos/openai/codex/issues/42/comments",
+    message: "Submitted provider review comment.",
+    providerResponseId: "123",
+    providerResponseUrl: "https://github.com/openai/codex/pull/42#issuecomment-123"
+  });
   repositoryMocks.unstageFile.mockResolvedValue({ command: "git restore --staged -- src/App.tsx", stderr: "", stdout: "unstaged" });
 }
 

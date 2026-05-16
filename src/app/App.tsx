@@ -79,6 +79,7 @@ import {
   buildProviderWorkItemDetails,
   type ProviderWorkItemDetail
 } from "@/features/repository/provider-work-item-details";
+import { buildProviderReviewDraftPreview, validateProviderReviewDraft } from "@/features/repository/provider-review-drafts";
 import { summarizeProviderReviewDetails } from "@/features/repository/provider-review-details";
 import { buildRepositoryHealth, type ProviderWorkItemsState, type RepositoryHealth } from "@/features/repository/repository-health";
 import {
@@ -117,6 +118,7 @@ import {
   saveProviderAccount,
   stageHunk,
   stageFile,
+  submitProviderReviewComment,
   testProviderConnection,
   unstageHunk,
   unstageFile
@@ -166,7 +168,9 @@ import type {
   ProviderCheckStatus,
   ProviderConnectionResult,
   ProviderKind,
+  ProviderReviewDraftPreview,
   ProviderReviewDetails,
+  ProviderReviewSubmitResult,
   ProviderRemote,
   ProviderWorkItem,
   RepositoryStatus,
@@ -266,6 +270,11 @@ export function App() {
   const [providerReviewDetails, setProviderReviewDetails] = useState<ProviderReviewDetails | null>(null);
   const [providerReviewLoading, setProviderReviewLoading] = useState(false);
   const [providerReviewError, setProviderReviewError] = useState("");
+  const [providerReviewDraftBody, setProviderReviewDraftBody] = useState("");
+  const [providerReviewDraftError, setProviderReviewDraftError] = useState("");
+  const [providerReviewDraftPreview, setProviderReviewDraftPreview] = useState<ProviderReviewDraftPreview | null>(null);
+  const [providerReviewDraftSubmitting, setProviderReviewDraftSubmitting] = useState(false);
+  const [providerReviewSubmitMessage, setProviderReviewSubmitMessage] = useState("");
   const [providerAccounts, setProviderAccounts] = useState<ProviderAccount[]>([]);
   const [providerAccountsLoading, setProviderAccountsLoading] = useState(false);
   const [providerAccountKind, setProviderAccountKind] = useState<ProviderAccountKind>("github");
@@ -429,6 +438,10 @@ export function App() {
 
     void loadProviderReviewDetails(repositoryPath, selectedId, accountId);
   }, [providerWorkItemDetails.detail?.accountId, providerWorkItemDetails.selectedId, providerWorkItemsVersion, repositoryPath]);
+
+  useEffect(() => {
+    clearProviderReviewDraftState();
+  }, [providerWorkItemDetails.selectedId]);
 
   useEffect(() => {
     if (!hasTauriRuntime()) {
@@ -664,6 +677,77 @@ export function App() {
       if (providerReviewRequestId.current === requestId) {
         setProviderReviewLoading(false);
       }
+    }
+  }
+
+  function updateProviderReviewDraftBody(body: string) {
+    setProviderReviewDraftBody(body);
+    setProviderReviewDraftError("");
+    setProviderReviewDraftPreview(null);
+    setProviderReviewSubmitMessage("");
+  }
+
+  function previewProviderReviewDraft() {
+    const itemId = providerReviewDetails?.itemId ?? providerWorkItemDetails.selectedId;
+    if (itemId === null) {
+      setProviderReviewDraftError("Load review details before previewing.");
+      setProviderReviewDraftPreview(null);
+      return;
+    }
+
+    const draft = {
+      body: providerReviewDraftBody,
+      itemId,
+      target: {
+        kind: "topLevel" as const
+      }
+    };
+    const validation = validateProviderReviewDraft(draft);
+    if (!validation.ok) {
+      setProviderReviewDraftError(validation.message);
+      setProviderReviewDraftPreview(null);
+      return;
+    }
+
+    setProviderReviewDraftError("");
+    setProviderReviewSubmitMessage("");
+    setProviderReviewDraftPreview(buildProviderReviewDraftPreview(draft));
+  }
+
+  async function submitProviderReviewDraft() {
+    const preview = providerReviewDraftPreview;
+    const itemId = providerReviewDetails?.itemId ?? providerWorkItemDetails.selectedId;
+    const accountId = providerWorkItemDetails.detail?.accountId ?? null;
+    if (repositoryPath === null || preview === null || itemId === null || accountId === null) {
+      setProviderReviewDraftError("Preview the provider payload before submitting.");
+      return;
+    }
+
+    setProviderReviewDraftSubmitting(true);
+    setProviderReviewDraftError("");
+
+    try {
+      const submitResult = await submitProviderReviewComment({
+        accountId,
+        body: preview.body,
+        itemId,
+        repositoryPath,
+        target: preview.target
+      });
+      const result = providerReviewSubmitOperationResult(submitResult);
+      setFeedback({ kind: "result", result });
+      recordOperationResult("Submit provider review comment", result);
+      setProviderReviewSubmitMessage(submitResult.message);
+      setProviderReviewDraftBody("");
+      setProviderReviewDraftPreview(null);
+      await loadProviderReviewDetails(repositoryPath, itemId, accountId);
+    } catch (error) {
+      const operationError = describeOperationError(error);
+      setFeedback({ kind: "error", error: operationError });
+      recordOperationError("Submit provider review comment", operationError);
+      setProviderReviewDraftError(operationError.message);
+    } finally {
+      setProviderReviewDraftSubmitting(false);
     }
   }
 
@@ -1797,6 +1881,15 @@ export function App() {
     setProviderReviewDetails(null);
     setProviderReviewError("");
     setProviderReviewLoading(false);
+    clearProviderReviewDraftState();
+  }
+
+  function clearProviderReviewDraftState() {
+    setProviderReviewDraftBody("");
+    setProviderReviewDraftError("");
+    setProviderReviewDraftPreview(null);
+    setProviderReviewDraftSubmitting(false);
+    setProviderReviewSubmitMessage("");
   }
 
   function clearOperationPreviewState() {
@@ -2595,10 +2688,18 @@ export function App() {
 
           <ProviderWorkItemDetailsPanel
             detail={providerWorkItemDetails.detail}
+            draftBody={providerReviewDraftBody}
+            draftError={providerReviewDraftError}
+            draftPreview={providerReviewDraftPreview}
+            draftSubmitting={providerReviewDraftSubmitting}
             loading={providerWorkItemsLoading}
+            onDraftBodyChange={updateProviderReviewDraftBody}
+            onPreviewDraft={previewProviderReviewDraft}
+            onSubmitDraft={submitProviderReviewDraft}
             reviewDetails={providerReviewDetails}
             reviewError={providerReviewError}
             reviewLoading={providerReviewLoading}
+            submitMessage={providerReviewSubmitMessage}
             repositoryOpened={repositoryPath !== null}
           />
 
@@ -2955,6 +3056,22 @@ function operationPreviewResult(preview: OperationPreview): GitOperationResult {
       `Changed files: ${preview.changedFiles.length}`,
       `Likely conflicts: ${preview.likelyConflictFiles.length}`
     ].join("\n")
+  };
+}
+
+function providerReviewSubmitOperationResult(result: ProviderReviewSubmitResult): GitOperationResult {
+  const responseLines = [result.message];
+  if (result.providerResponseUrl !== null) {
+    responseLines.push(result.providerResponseUrl);
+  }
+  if (result.providerResponseId !== null) {
+    responseLines.push(`Provider response id: ${result.providerResponseId}`);
+  }
+
+  return {
+    command: result.command,
+    stderr: "",
+    stdout: responseLines.join("\n")
   };
 }
 
@@ -3921,17 +4038,33 @@ function ProviderWorkItemsPanel({
 
 function ProviderWorkItemDetailsPanel({
   detail,
+  draftBody,
+  draftError,
+  draftPreview,
+  draftSubmitting,
   loading,
+  onDraftBodyChange,
+  onPreviewDraft,
+  onSubmitDraft,
   reviewDetails,
   reviewError,
   reviewLoading,
+  submitMessage,
   repositoryOpened
 }: {
   detail: ProviderWorkItemDetail | null;
+  draftBody: string;
+  draftError: string;
+  draftPreview: ProviderReviewDraftPreview | null;
+  draftSubmitting: boolean;
   loading: boolean;
+  onDraftBodyChange: (body: string) => void;
+  onPreviewDraft: () => void;
+  onSubmitDraft: () => void;
   reviewDetails: ProviderReviewDetails | null;
   reviewError: string;
   reviewLoading: boolean;
+  submitMessage: string;
   repositoryOpened: boolean;
 }) {
   return (
@@ -3972,9 +4105,77 @@ function ProviderWorkItemDetailsPanel({
           </div>
 
           <ProviderReviewDetailsView details={reviewDetails} error={reviewError} loading={reviewLoading} />
+          <ProviderReviewDraftPanel
+            body={draftBody}
+            disabled={reviewDetails === null || reviewLoading}
+            error={draftError}
+            onBodyChange={onDraftBodyChange}
+            onPreview={onPreviewDraft}
+            onSubmit={onSubmitDraft}
+            preview={draftPreview}
+            submitMessage={submitMessage}
+            submitting={draftSubmitting}
+          />
         </div>
       )}
     </section>
+  );
+}
+
+function ProviderReviewDraftPanel({
+  body,
+  disabled,
+  error,
+  onBodyChange,
+  onPreview,
+  onSubmit,
+  preview,
+  submitMessage,
+  submitting
+}: {
+  body: string;
+  disabled: boolean;
+  error: string;
+  onBodyChange: (body: string) => void;
+  onPreview: () => void;
+  onSubmit: () => void;
+  preview: ProviderReviewDraftPreview | null;
+  submitMessage: string;
+  submitting: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-md border bg-background p-2 text-xs">
+      <label className="font-medium" htmlFor="provider-review-draft-body">
+        Review comment
+      </label>
+      <Textarea
+        className="min-h-20 resize-y text-xs"
+        disabled={disabled}
+        id="provider-review-draft-body"
+        onChange={(event) => onBodyChange(event.target.value)}
+        placeholder="Write a review comment"
+        value={body}
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button disabled={disabled} onClick={onPreview} size="sm" type="button" variant="outline">
+          Preview comment
+        </Button>
+        <Button disabled={disabled || preview === null || submitting} onClick={onSubmit} size="sm" type="button" variant="secondary">
+          {submitting ? "Submitting" : "Submit comment"}
+        </Button>
+        {error.length > 0 && <p className="text-destructive">{error}</p>}
+      </div>
+      {submitMessage.length > 0 && <p className="text-muted-foreground">{submitMessage}</p>}
+      {preview !== null && (
+        <div className="rounded-sm border bg-muted/20 p-2">
+          <p className="font-medium">Payload preview</p>
+          <p className="mt-1 text-muted-foreground">{preview.summary}</p>
+          <pre className="mt-2 max-h-32 overflow-auto rounded-sm bg-background p-2 text-[11px] leading-relaxed">
+            {JSON.stringify({ body: preview.body, target: preview.target }, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
   );
 }
 
