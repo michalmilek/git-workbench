@@ -59,6 +59,10 @@ import {
   type OperationQueueStatus
 } from "@/features/repository/operation-queue";
 import { trustedProviderUrl } from "@/features/repository/provider-links";
+import {
+  buildProviderWorkItemDetails,
+  type ProviderWorkItemDetail
+} from "@/features/repository/provider-work-item-details";
 import { buildRepositoryHealth, type ProviderWorkItemsState, type RepositoryHealth } from "@/features/repository/repository-health";
 import {
   abortMerge,
@@ -228,6 +232,7 @@ export function App() {
   const [providerWorkMessage, setProviderWorkMessage] = useState("");
   const [providerWorkItemsState, setProviderWorkItemsState] = useState<ProviderWorkItemsState>("idle");
   const [providerWorkItemsLoading, setProviderWorkItemsLoading] = useState(false);
+  const [selectedProviderWorkItemId, setSelectedProviderWorkItemId] = useState<string | null>(null);
   const [providerAccounts, setProviderAccounts] = useState<ProviderAccount[]>([]);
   const [providerAccountsLoading, setProviderAccountsLoading] = useState(false);
   const [providerAccountKind, setProviderAccountKind] = useState<ProviderAccountKind>("github");
@@ -287,6 +292,10 @@ export function App() {
         status
       }),
     [conflictState, providerWorkItems, providerWorkItemsState, repositoryHealthNow, repositoryRefreshedAt, status]
+  );
+  const providerWorkItemDetails = useMemo(
+    () => buildProviderWorkItemDetails(providerWorkItems, selectedProviderWorkItemId),
+    [providerWorkItems, selectedProviderWorkItemId]
   );
   const filteredHistory = useMemo(() => filterCommitHistory(history, historyFilter), [history, historyFilter]);
   const commitGraphRows = useMemo(() => buildCommitGraphRows(filteredHistory), [filteredHistory]);
@@ -422,6 +431,7 @@ export function App() {
       setProviderWorkItems([]);
       setProviderWorkMessage("");
       setProviderWorkItemsState("idle");
+      setSelectedProviderWorkItemId(null);
       clearHistoryState();
       clearOperationPreviewState();
     }
@@ -480,6 +490,7 @@ export function App() {
         setProviderWorkItems([]);
         setProviderWorkMessage("");
         setProviderWorkItemsState("unavailable");
+        setSelectedProviderWorkItemId(null);
         setProviderWorkItemsLoading(false);
         setSelectedStashRef(null);
         clearHistoryState();
@@ -527,6 +538,7 @@ export function App() {
         setProviderWorkItems(nextProviderWorkItems.items);
         setProviderWorkMessage(nextProviderWorkItems.message);
         setProviderWorkItemsState("loaded");
+        setSelectedProviderWorkItemId((currentId) => buildProviderWorkItemDetails(nextProviderWorkItems.items, currentId).selectedId);
       }
     } catch (error) {
       if (isCurrentProviderWorkItemsRequest(requestId)) {
@@ -536,6 +548,7 @@ export function App() {
         setProviderWorkItems([]);
         setProviderWorkMessage(operationError.message);
         setProviderWorkItemsState("unavailable");
+        setSelectedProviderWorkItemId(null);
       }
     } finally {
       if (isCurrentProviderWorkItemsRequest(requestId)) {
@@ -2204,6 +2217,16 @@ export function App() {
             items={providerWorkItems}
             loading={providerWorkItemsLoading}
             message={providerWorkMessage}
+            selectedItemId={providerWorkItemDetails.selectedId}
+            repositoryOpened={repositoryPath !== null}
+            onSelectItem={(item) => {
+              setSelectedProviderWorkItemId(item.id);
+            }}
+          />
+
+          <ProviderWorkItemDetailsPanel
+            detail={providerWorkItemDetails.detail}
+            loading={providerWorkItemsLoading}
             repositoryOpened={repositoryPath !== null}
           />
 
@@ -3354,12 +3377,16 @@ function ProviderWorkItemsPanel({
   items,
   loading,
   message,
-  repositoryOpened
+  onSelectItem,
+  repositoryOpened,
+  selectedItemId
 }: {
   items: ProviderWorkItem[];
   loading: boolean;
   message: string;
+  onSelectItem(item: ProviderWorkItem): void;
   repositoryOpened: boolean;
+  selectedItemId: string | null;
 }) {
   return (
     <div className="mt-4 flex flex-col gap-3 rounded-md border bg-background p-3 text-sm">
@@ -3377,13 +3404,92 @@ function ProviderWorkItemsPanel({
         ) : items.length === 0 ? (
           <p className="text-sm text-muted-foreground">{loading ? "Loading" : formatProviderWorkMessage(message)}</p>
         ) : (
-          items.map((item) => <ProviderWorkItemCard item={item} key={item.id} />)
+          items.map((item) => (
+            <ProviderWorkItemCard
+              item={item}
+              key={item.id}
+              selected={item.id === selectedItemId}
+              onSelect={() => {
+                onSelectItem(item);
+              }}
+            />
+          ))
         )}
       </div>
 
       {repositoryOpened && items.length > 0 && message.length > 0 ? (
         <p className="text-xs text-muted-foreground">{message}</p>
       ) : null}
+    </div>
+  );
+}
+
+function ProviderWorkItemDetailsPanel({
+  detail,
+  loading,
+  repositoryOpened
+}: {
+  detail: ProviderWorkItemDetail | null;
+  loading: boolean;
+  repositoryOpened: boolean;
+}) {
+  return (
+    <section className="mt-4 flex flex-col gap-3 rounded-md border bg-background p-3 text-sm" data-testid="provider-work-item-details-panel">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 font-medium">
+          <IconGitPullRequest aria-hidden="true" className="size-4 shrink-0" />
+          Provider review
+        </div>
+        <Badge variant={detail === null ? "outline" : detail.checkTone}>{detail?.reviewKindLabel ?? "No item"}</Badge>
+      </div>
+
+      {!repositoryOpened ? (
+        <p className="text-sm text-muted-foreground">No repository</p>
+      ) : loading ? (
+        <p className="text-sm text-muted-foreground">Loading work items</p>
+      ) : detail === null ? (
+        <p className="text-sm text-muted-foreground">No PR/MR selected.</p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="min-w-0">
+            <p className="truncate font-medium">{detail.title}</p>
+            <p className="mt-1 truncate text-xs text-muted-foreground">
+              {detail.authorLabel} | {detail.branchFlowLabel}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <ProviderDetailRow label="Provider" value={detail.providerLabel} />
+            <ProviderDetailRow label="Remote" value={detail.remoteLabel} />
+            <ProviderDetailRow label="State" value={detail.stateLabel} />
+            <ProviderDetailRow label="CI" value={detail.checkLabel} variant={detail.checkTone} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <ProviderExternalLink label="PR/MR" providerBaseUrl={detail.providerBaseUrl} url={detail.workUrl} />
+            <ProviderExternalLink label="CI" providerBaseUrl={detail.providerBaseUrl} url={detail.ciUrl} />
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ProviderDetailRow({
+  label,
+  value,
+  variant = "outline"
+}: {
+  label: string;
+  value: string;
+  variant?: "secondary" | "destructive" | "outline";
+}) {
+  return (
+    <div className="min-w-0 rounded-md border p-2">
+      <p className="text-muted-foreground">{label}</p>
+      <Badge className="mt-1 max-w-full truncate" variant={variant}>
+        {value}
+      </Badge>
     </div>
   );
 }
@@ -3536,9 +3642,25 @@ function ProviderAccountsPanel({
   );
 }
 
-function ProviderWorkItemCard({ item }: { item: ProviderWorkItem }) {
+function ProviderWorkItemCard({
+  item,
+  onSelect,
+  selected
+}: {
+  item: ProviderWorkItem;
+  onSelect(): void;
+  selected: boolean;
+}) {
   return (
-    <div className="rounded-md border p-2">
+    <button
+      aria-pressed={selected}
+      className={cn(
+        "rounded-md border p-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+        selected && "border-primary bg-primary/5"
+      )}
+      onClick={onSelect}
+      type="button"
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate font-medium">{item.title}</p>
@@ -3556,12 +3678,7 @@ function ProviderWorkItemCard({ item }: { item: ProviderWorkItem }) {
         <Badge variant="outline">{item.state}</Badge>
         <Badge variant={providerCheckStatusBadgeVariant(item.checkStatus)}>CI: {item.checkStatus}</Badge>
       </div>
-
-      <div className="mt-2 grid grid-cols-2 gap-2">
-        <ProviderExternalLink label="PR/MR" providerBaseUrl={item.providerBaseUrl} url={item.webUrl} />
-        <ProviderExternalLink label="CI" providerBaseUrl={item.providerBaseUrl} url={item.ciUrl} />
-      </div>
-    </div>
+    </button>
   );
 }
 
