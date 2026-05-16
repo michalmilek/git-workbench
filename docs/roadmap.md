@@ -38,6 +38,7 @@ The repository already includes:
 - Merge and rebase execution after explicit preview confirmation.
 - Conflict state display with abort merge, abort rebase, and continue rebase actions.
 - Operation queue with live Git command logs for long-running operations.
+- Smart commit grouping suggestions with conventional summaries, commit bodies, counts, and group staging.
 - Persistent command log stored in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
 
@@ -79,6 +80,7 @@ These items are already implemented on `main`:
 - Merge and rebase execution after explicit preview confirmation.
 - Conflict state display with abort merge, abort rebase, and continue rebase actions.
 - Operation queue with live Git command logs for long-running operations.
+- Smart commit grouping suggestions with conventional summaries, commit bodies, staged/worktree/conflict counts, and group staging that skips unresolved conflicts.
 - Latest operation result/error display with command, stdout, and stderr.
 - Persistent command log stored in localStorage.
 - Frontend tests for repository summaries, recents, commit validation, and Tauri invoke payloads.
@@ -102,7 +104,7 @@ Goal: turn the current shell into the first useful desktop Git client.
 - Done: show operation result/error details and command output for each Git action.
 - Done: live progress logs for long-running Git operations.
 
-Recommended next milestone: add smart commit grouping.
+Recommended next milestone: add a multi-repository workspace.
 
 ## P1: Daily Branch Workflows
 
@@ -158,8 +160,8 @@ Goal: build the features that make the app clearly better than a standard Git GU
 
 - Done: add a highly readable branch graph with strong filtering.
 - Done: add "what will happen" previews before pull, push, merge, and rebase.
-- Next: add smart commit grouping for related changes.
-- Add a multi-repository workspace.
+- Done: add smart commit grouping for related changes.
+- Next: add a multi-repository workspace.
 - Add a repository health panel with dirty state, ahead/behind counts, CI status, open PR/MR state, and last fetch time.
 - Add provider-neutral PR/MR views across GitHub and GitLab.
 - Add batch operations: fetch all, pull selected, push selected.
@@ -209,4 +211,5 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 16. Done: pull and push previews.
 17. Done: hunk-level staging.
 18. Done: branch graph readability and stronger history filtering.
-19. Next: smart commit grouping.
+19. Done: smart commit grouping.
+20. Next: multi-repository workspace.

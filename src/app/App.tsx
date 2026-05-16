@@ -34,6 +34,12 @@ import {
   serializeCommandLog,
   type CommandLogEntry
 } from "@/features/repository/command-log";
+import {
+  buildCommitGroupSuggestions,
+  isCommitGroupStageableFile,
+  type CommitGroupSuggestion
+} from "@/features/repository/commit-groups";
+import { buildPartialStageGroupError, buildStageGroupResult } from "@/features/repository/commit-group-stage";
 import { isCommitSummaryValid } from "@/features/repository/commit-validation";
 import {
   buildCommitGraphRows,
@@ -253,6 +259,7 @@ export function App() {
   const operationQueueId = useRef(0);
 
   const summary = useMemo(() => (status === null ? null : summarizeRepositoryStatus(status)), [status]);
+  const commitGroupSuggestions = useMemo(() => buildCommitGroupSuggestions(status?.files ?? []), [status?.files]);
   const filteredHistory = useMemo(() => filterCommitHistory(history, historyFilter), [history, historyFilter]);
   const commitGraphRows = useMemo(() => buildCommitGraphRows(filteredHistory), [filteredHistory]);
   const selectedFile = getSelectedFile(status, selectedFilePath);
@@ -643,6 +650,55 @@ export function App() {
       const operationError = describeOperationError(error);
       setFeedback({ kind: "error", error: operationError });
       recordOperationError("Stage file", operationError);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function useCommitGroupSuggestion(suggestion: CommitGroupSuggestion) {
+    setCommitSummary(suggestion.summary);
+    setCommitBody(suggestion.body);
+  }
+
+  async function stageCommitGroup(suggestion: CommitGroupSuggestion) {
+    if (repositoryPath === null) {
+      return;
+    }
+
+    const filesToStage = suggestion.files.filter(isCommitGroupStageableFile);
+    if (filesToStage.length === 0) {
+      return;
+    }
+
+    const currentRepositoryPath = repositoryPath;
+    invalidateDiffRequests();
+    setBusyAction("stage");
+
+    const stagedResults: GitOperationResult[] = [];
+    let shouldRefreshStatus = false;
+
+    try {
+      for (const file of filesToStage) {
+        stagedResults.push(await stageFile({ repositoryPath: currentRepositoryPath, filePath: file.path }));
+        shouldRefreshStatus = true;
+      }
+
+      const result = buildStageGroupResult(suggestion, filesToStage, stagedResults);
+      setFeedback({ kind: "result", result });
+      recordOperationResult("Stage group", result);
+      await loadRepositoryStatus(currentRepositoryPath, selectedFilePath);
+    } catch (error) {
+      const operationError = buildPartialStageGroupError({
+        error: describeOperationError(error),
+        stagedFiles: filesToStage.slice(0, stagedResults.length),
+        stagedResults,
+        suggestion
+      });
+      setFeedback({ kind: "error", error: operationError });
+      recordOperationError("Stage group", operationError);
+      if (shouldRefreshStatus) {
+        await loadRepositoryStatus(currentRepositoryPath, selectedFilePath);
+      }
     } finally {
       setBusyAction(null);
     }
@@ -1901,6 +1957,14 @@ export function App() {
           </div>
 
           <div className="mt-4 flex flex-col gap-3">
+            <SuggestedCommitGroups
+              busyAction={busyAction}
+              repositoryOpened={repositoryPath !== null}
+              suggestions={commitGroupSuggestions}
+              onStageGroup={(suggestion) => void stageCommitGroup(suggestion)}
+              onUseSummary={useCommitGroupSuggestion}
+            />
+
             <label className="flex flex-col gap-1 text-sm font-medium">
               Summary
               <input
@@ -2471,6 +2535,97 @@ function chooseDiffModeAfterHunkApply(file: StatusFile | null, requestedMode: Di
   }
 
   return getPreferredDiffMode(file);
+}
+
+function SuggestedCommitGroups({
+  busyAction,
+  onStageGroup,
+  onUseSummary,
+  repositoryOpened,
+  suggestions
+}: {
+  busyAction: BusyAction;
+  onStageGroup(suggestion: CommitGroupSuggestion): void;
+  onUseSummary(suggestion: CommitGroupSuggestion): void;
+  repositoryOpened: boolean;
+  suggestions: CommitGroupSuggestion[];
+}) {
+  const actionsDisabled = busyAction !== null || !repositoryOpened;
+
+  return (
+    <section className="rounded-md border bg-background p-3 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-medium">Suggested commits</p>
+        <Badge variant="secondary">{suggestions.length}</Badge>
+      </div>
+
+      {suggestions.length === 0 ? (
+        <p className="mt-2 text-muted-foreground">Open a repository with changes to see suggestions.</p>
+      ) : (
+        <div className="mt-2 flex flex-col">
+          {suggestions.map((suggestion) => {
+            const previewPaths = suggestion.files.slice(0, 3);
+            const hiddenPathCount = suggestion.files.length - previewPaths.length;
+            const groupHasStageableFiles = suggestion.stageableCount > 0;
+
+            return (
+              <div className="border-t py-3 first:border-t-0 first:pt-0 last:pb-0" key={suggestion.id}>
+                <div className="flex min-w-0 items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{suggestion.title}</p>
+                    <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{suggestion.description}</p>
+                  </div>
+                  <Badge variant="outline">{suggestion.files.length}</Badge>
+                </div>
+
+                <div className="mt-2 flex flex-wrap gap-1">
+                  <Badge variant="secondary">{suggestion.stagedCount} staged</Badge>
+                  <Badge variant="secondary">{suggestion.worktreeCount} worktree</Badge>
+                  <Badge variant={suggestion.conflictCount > 0 ? "destructive" : "outline"}>
+                    {suggestion.conflictCount} conflicts
+                  </Badge>
+                </div>
+
+                <div className="mt-2 flex flex-col gap-1">
+                  {previewPaths.map((file) => (
+                    <p className="truncate font-mono text-[0.6875rem] text-muted-foreground" key={file.path}>
+                      {file.path}
+                    </p>
+                  ))}
+                  {hiddenPathCount > 0 ? (
+                    <p className="text-[0.6875rem] text-muted-foreground">+{hiddenPathCount} more</p>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <Button
+                    disabled={actionsDisabled}
+                    onClick={() => onUseSummary(suggestion)}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <IconGitCommit aria-hidden="true" data-icon="inline-start" />
+                    Use summary
+                  </Button>
+                  <Button
+                    disabled={actionsDisabled || !groupHasStageableFiles}
+                    onClick={() => onStageGroup(suggestion)}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    <IconPlus aria-hidden="true" data-icon="inline-start" />
+                    Stage group
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function DiffDisplay({
