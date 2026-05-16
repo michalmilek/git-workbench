@@ -51,6 +51,8 @@ describe("createRepositoryClient", () => {
     await client.getFileDiff({ filePath: "src/App.tsx", repositoryPath: "/repo", staged: true });
     await client.stageFile({ filePath: "src/App.tsx", repositoryPath: "/repo" });
     await client.unstageFile({ filePath: "src/App.tsx", repositoryPath: "/repo" });
+    await client.stageHunk({ patch: "diff --git a/src/App.tsx b/src/App.tsx", repositoryPath: "/repo" });
+    await client.unstageHunk({ patch: "diff --git a/src/App.tsx b/src/App.tsx", repositoryPath: "/repo" });
     await client.commitChanges({ amend: false, body: "", repositoryPath: "/repo", summary: "commit" });
     await client.fetchRepository({ operationId: "operation-fetch", repositoryPath: "/repo" });
     await client.pullRepository({ operationId: "operation-pull", repositoryPath: "/repo" });
@@ -100,6 +102,14 @@ describe("createRepositoryClient", () => {
       },
       { args: { filePath: "src/App.tsx", repositoryPath: "/repo" }, command: "stage_file" },
       { args: { filePath: "src/App.tsx", repositoryPath: "/repo" }, command: "unstage_file" },
+      {
+        args: { patch: "diff --git a/src/App.tsx b/src/App.tsx", repositoryPath: "/repo" },
+        command: "stage_hunk"
+      },
+      {
+        args: { patch: "diff --git a/src/App.tsx b/src/App.tsx", repositoryPath: "/repo" },
+        command: "unstage_hunk"
+      },
       {
         args: { amend: false, body: "", repositoryPath: "/repo", summary: "commit" },
         command: "commit_changes"
@@ -249,6 +259,16 @@ describe("browser repository client", () => {
     });
     await expect(client.stageFile({ filePath: "src/app/App.tsx", repositoryPath: "/repo" })).resolves.toEqual({
       command: "git add -- src/app/App.tsx",
+      stderr: "",
+      stdout: "Open the app through Tauri to run mutating Git commands."
+    });
+    await expect(client.stageHunk({ patch: "patch", repositoryPath: "/repo" })).resolves.toEqual({
+      command: "git apply --cached",
+      stderr: "",
+      stdout: "Open the app through Tauri to run mutating Git commands."
+    });
+    await expect(client.unstageHunk({ patch: "patch", repositoryPath: "/repo" })).resolves.toEqual({
+      command: "git apply --cached --reverse",
       stderr: "",
       stdout: "Open the app through Tauri to run mutating Git commands."
     });

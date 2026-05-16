@@ -35,6 +35,7 @@ import {
   type CommandLogEntry
 } from "@/features/repository/command-log";
 import { isCommitSummaryValid } from "@/features/repository/commit-validation";
+import { buildHunkPatch, parseDiffHunks, type ParsedDiff } from "@/features/repository/diff-hunks";
 import {
   applyOperationEvent,
   createOperationQueueEntry,
@@ -78,8 +79,10 @@ import {
   runMerge,
   runRebase,
   saveProviderAccount,
+  stageHunk,
   stageFile,
   testProviderConnection,
+  unstageHunk,
   unstageFile
 } from "@/features/repository/repository-client";
 import {
@@ -644,6 +647,63 @@ export function App() {
       recordOperationError("Unstage file", operationError);
     } finally {
       setBusyAction(null);
+    }
+  }
+
+  async function applySelectedHunk(hunkId: string) {
+    if (repositoryPath === null || selectedFile === null || diff === null || diff.isBinary) {
+      return;
+    }
+
+    const currentRepositoryPath = repositoryPath;
+    const currentFilePath = selectedFile.path;
+    const parsedDiff = parseDiffHunks(diff.text);
+    const operation = diffMode === "staged" ? "Unstage hunk" : "Stage hunk";
+    const patch = buildHunkPatch(parsedDiff, hunkId);
+
+    invalidateDiffRequests();
+    setBusyAction(diffMode === "staged" ? "unstage" : "stage");
+
+    try {
+      const result =
+        diffMode === "staged"
+          ? await unstageHunk({ patch, repositoryPath: currentRepositoryPath })
+          : await stageHunk({ patch, repositoryPath: currentRepositoryPath });
+      setFeedback({ kind: "result", result });
+      recordOperationResult(operation, result);
+      await reloadSelectedDiffAfterHunkApply(currentRepositoryPath, currentFilePath, diffMode);
+    } catch (error) {
+      const operationError = describeOperationError(error);
+      setFeedback({ kind: "error", error: operationError });
+      recordOperationError(operation, operationError);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function reloadSelectedDiffAfterHunkApply(repository: string, filePath: string, requestedMode: DiffMode) {
+    const requestId = diffRequestId.current + 1;
+    diffRequestId.current = requestId;
+
+    const nextStatus = await getRepositoryStatus(repository);
+    if (diffRequestId.current !== requestId) {
+      return;
+    }
+
+    const nextFile = getSelectedFile(nextStatus, filePath);
+    const nextMode = chooseDiffModeAfterHunkApply(nextFile, requestedMode);
+    setStatus(nextStatus);
+    setSelectedFilePath(nextFile?.path ?? null);
+    setDiffMode(nextMode);
+    setDiff(null);
+
+    if (nextFile === null) {
+      return;
+    }
+
+    const nextDiff = await getFileDiff({ filePath: nextFile.path, repositoryPath: repository, staged: nextMode === "staged" });
+    if (diffRequestId.current === requestId) {
+      setDiff(nextDiff);
     }
   }
 
@@ -1570,9 +1630,14 @@ export function App() {
                 </Button>
               </div>
 
-              <pre className="mt-4 max-h-[420px] overflow-auto rounded-md bg-background p-4 text-sm leading-6">
-                {renderDiffText(diff, busyAction)}
-              </pre>
+              <DiffDisplay
+                busyAction={busyAction}
+                diff={diff}
+                diffMode={diffMode}
+                onApplyHunk={(hunkId) => {
+                  void applySelectedHunk(hunkId);
+                }}
+              />
             </div>
           </div>
             </>
@@ -2365,6 +2430,111 @@ function renderDiffText(diff: FileDiff | null, busyAction: BusyAction): string {
   }
 
   return diff.text.length === 0 ? "No diff output." : diff.text;
+}
+
+function chooseDiffModeAfterHunkApply(file: StatusFile | null, requestedMode: DiffMode): DiffMode {
+  if (file === null) {
+    return "worktree";
+  }
+
+  if (requestedMode === "staged" && hasStagedChanges(file)) {
+    return "staged";
+  }
+
+  if (requestedMode === "worktree" && hasWorktreeChanges(file)) {
+    return "worktree";
+  }
+
+  return getPreferredDiffMode(file);
+}
+
+function DiffDisplay({
+  busyAction,
+  diff,
+  diffMode,
+  onApplyHunk
+}: {
+  busyAction: BusyAction;
+  diff: FileDiff | null;
+  diffMode: DiffMode;
+  onApplyHunk(hunkId: string): void;
+}) {
+  if (diff === null || diff.isBinary || diff.text.length === 0 || busyAction === "diff") {
+    return (
+      <pre className="mt-4 max-h-[420px] overflow-auto rounded-md bg-background p-4 text-sm leading-6">
+        {renderDiffText(diff, busyAction)}
+      </pre>
+    );
+  }
+
+  const parsedDiff = parseDiffHunks(diff.text);
+  const hunkCount = parsedDiff.files.reduce((count, file) => count + file.hunks.length, 0);
+
+  if (hunkCount === 0) {
+    return (
+      <pre className="mt-4 max-h-[420px] overflow-auto rounded-md bg-background p-4 text-sm leading-6">
+        {renderDiffText(diff, busyAction)}
+      </pre>
+    );
+  }
+
+  return (
+    <DiffHunkViewer
+      busyAction={busyAction}
+      diffMode={diffMode}
+      parsedDiff={parsedDiff}
+      onApplyHunk={onApplyHunk}
+    />
+  );
+}
+
+function DiffHunkViewer({
+  busyAction,
+  diffMode,
+  onApplyHunk,
+  parsedDiff
+}: {
+  busyAction: BusyAction;
+  diffMode: DiffMode;
+  onApplyHunk(hunkId: string): void;
+  parsedDiff: ParsedDiff;
+}) {
+  return (
+    <div className="mt-4 flex max-h-[420px] min-w-0 flex-col overflow-auto rounded-md bg-background text-sm leading-6">
+      {parsedDiff.files.map((file) => (
+        <div className="min-w-max border-b last:border-b-0" key={file.headerLines.join("\n")}>
+          {file.headerLines.length === 0 ? null : (
+            <pre className="border-b p-4 font-mono text-xs leading-5 text-muted-foreground">{file.headerLines.join("\n")}</pre>
+          )}
+
+          {file.hunks.map((hunk) => (
+            <section className="border-b last:border-b-0" key={hunk.id}>
+              <div className="sticky left-0 flex min-w-0 flex-wrap items-center justify-between gap-2 bg-muted/50 px-4 py-2">
+                <code className="min-w-0 break-all text-xs text-muted-foreground">{hunk.header}</code>
+                <Button
+                  disabled={busyAction !== null}
+                  onClick={() => {
+                    onApplyHunk(hunk.id);
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  {diffMode === "staged" ? (
+                    <IconMinus aria-hidden="true" data-icon="inline-start" />
+                  ) : (
+                    <IconPlus aria-hidden="true" data-icon="inline-start" />
+                  )}
+                  {diffMode === "staged" ? "Unstage hunk" : "Stage hunk"}
+                </Button>
+              </div>
+              <pre className="p-4 font-mono text-xs leading-5">{hunk.lines.join("\n")}</pre>
+            </section>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function BranchOperationControls({

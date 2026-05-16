@@ -56,6 +56,7 @@ These items are already implemented on `main`:
 - Untracked text file preview rendered as a synthetic diff.
 - Binary diff marker detection.
 - File-level stage and unstage operations.
+- Hunk-level stage and unstage for supported text diffs.
 - Commit composer with summary, optional body, amend toggle, and staged-change validation.
 - Commit creation through the system `git`.
 - Fetch, pull, and push commands through the system `git`.
@@ -93,7 +94,7 @@ Goal: turn the current shell into the first useful desktop Git client.
 - Done: show changed files grouped by status.
 - Done: display text diffs for selected files.
 - Done: stage and unstage complete files.
-- Not done: stage and unstage individual hunks for supported text diffs.
+- Done: stage and unstage individual hunks for supported text diffs.
 - Done: fall back to file-level staging for binary files and unsupported diff shapes.
 - Done: add a commit composer with summary, body, amend toggle, and validation.
 - Done: create commits through the system `git`.
@@ -101,7 +102,7 @@ Goal: turn the current shell into the first useful desktop Git client.
 - Done: show operation result/error details and command output for each Git action.
 - Done: live progress logs for long-running Git operations.
 
-Recommended next milestone: add hunk-level staging.
+Recommended next milestone: strengthen the branch graph and history filtering.
 
 ## P1: Daily Branch Workflows
 
@@ -155,7 +156,7 @@ Goal: make risky Git actions understandable before they run and recoverable afte
 
 Goal: build the features that make the app clearly better than a standard Git GUI.
 
-- Add a highly readable branch graph with strong filtering.
+- Next: add a highly readable branch graph with strong filtering.
 - Done: add "what will happen" previews before pull, push, merge, and rebase.
 - Add smart commit grouping for related changes.
 - Add a multi-repository workspace.
@@ -206,4 +207,5 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 14. Done: conflict display and recovery.
 15. Done: live operation queue with logs.
 16. Done: pull and push previews.
-17. Next: hunk-level staging.
+17. Done: hunk-level staging.
+18. Next: branch graph readability and stronger history filtering.

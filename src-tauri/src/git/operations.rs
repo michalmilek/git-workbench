@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use crate::{
     git::{
-        command::{GitOperationResult, run_git},
+        command::{GitOperationResult, run_git, run_git_with_stdin},
         operation_stream::run_git_with_events,
     },
     operation_error::OperationError,
@@ -67,6 +67,32 @@ pub fn unstage_file(
 ) -> Result<GitOperationResult, OperationError> {
     let args = unstage_args(file_path);
     run_git(repository_path, &args)
+}
+
+/// Stages a single unified diff hunk by applying it to the index.
+///
+/// # Errors
+///
+/// Returns an operation error when Git cannot be executed or exits unsuccessfully.
+pub fn stage_hunk(
+    repository_path: &Path,
+    patch: &str,
+) -> Result<GitOperationResult, OperationError> {
+    let args = stage_hunk_args();
+    run_git_with_stdin(repository_path, &args, patch)
+}
+
+/// Unstages a single unified diff hunk by reversing it from the index.
+///
+/// # Errors
+///
+/// Returns an operation error when Git cannot be executed or exits unsuccessfully.
+pub fn unstage_hunk(
+    repository_path: &Path,
+    patch: &str,
+) -> Result<GitOperationResult, OperationError> {
+    let args = unstage_hunk_args();
+    run_git_with_stdin(repository_path, &args, patch)
 }
 
 /// Commits staged changes with the supplied message.
@@ -186,6 +212,23 @@ fn unstage_args(file_path: &str) -> Vec<String> {
     ]
 }
 
+fn stage_hunk_args() -> Vec<String> {
+    vec![
+        String::from("apply"),
+        String::from("--cached"),
+        String::from("--whitespace=nowarn"),
+    ]
+}
+
+fn unstage_hunk_args() -> Vec<String> {
+    vec![
+        String::from("apply"),
+        String::from("--cached"),
+        String::from("--reverse"),
+        String::from("--whitespace=nowarn"),
+    ]
+}
+
 fn commit_args(summary: &str, body: Option<String>, amend: bool) -> Vec<String> {
     let mut args = vec![String::from("commit")];
     if amend {
@@ -278,7 +321,7 @@ mod tests {
     use super::{
         commit_args, commit_changes, diff_args, fetch_repository_args, get_file_diff,
         is_binary_diff, pull_repository_args, push_repository_args, render_untracked_text_diff,
-        stage_file, unstage_file,
+        stage_file, stage_hunk, stage_hunk_args, unstage_file, unstage_hunk, unstage_hunk_args,
     };
     use crate::git::{
         operation_stream::command_text,
@@ -333,6 +376,22 @@ mod tests {
         assert_eq!(command_text(&fetch_repository_args()), "git fetch");
         assert_eq!(command_text(&pull_repository_args()), "git pull");
         assert_eq!(command_text(&push_repository_args()), "git push");
+    }
+
+    #[test]
+    fn builds_stage_hunk_args() {
+        assert_eq!(
+            stage_hunk_args(),
+            ["apply", "--cached", "--whitespace=nowarn"]
+        );
+    }
+
+    #[test]
+    fn builds_unstage_hunk_args() {
+        assert_eq!(
+            unstage_hunk_args(),
+            ["apply", "--cached", "--reverse", "--whitespace=nowarn"]
+        );
     }
 
     #[test]
@@ -397,6 +456,52 @@ new file mode 100644
         Ok(())
     }
 
+    #[test]
+    fn stages_one_worktree_hunk_in_real_repository() -> Result<(), Box<dyn Error>> {
+        let repository_path = create_test_repository("stage-one-hunk")?;
+        write_committed_hunk_fixture(&repository_path)?;
+        fs::write(repository_path.join("story.txt"), changed_hunk_fixture())?;
+
+        let result = stage_hunk(&repository_path, first_hunk_patch())?;
+
+        assert_eq!(result.command, "git apply --cached --whitespace=nowarn");
+        let staged_diff = run_git_output(&repository_path, ["diff", "--cached"])?;
+        let unstaged_diff = run_git_output(&repository_path, ["diff"])?;
+        assert!(staged_diff.contains("+line 02 staged"));
+        assert!(!staged_diff.contains("+line 18 unstaged"));
+        assert!(unstaged_diff.contains("+line 18 unstaged"));
+        assert!(!unstaged_diff.contains("+line 02 staged"));
+
+        fs::remove_dir_all(repository_path)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn unstages_one_staged_hunk_in_real_repository() -> Result<(), Box<dyn Error>> {
+        let repository_path = create_test_repository("unstage-one-hunk")?;
+        write_committed_hunk_fixture(&repository_path)?;
+        fs::write(repository_path.join("story.txt"), changed_hunk_fixture())?;
+        run_git_command(&repository_path, ["add", "story.txt"])?;
+
+        let result = unstage_hunk(&repository_path, first_hunk_patch())?;
+
+        assert_eq!(
+            result.command,
+            "git apply --cached --reverse --whitespace=nowarn"
+        );
+        let staged_diff = run_git_output(&repository_path, ["diff", "--cached"])?;
+        let unstaged_diff = run_git_output(&repository_path, ["diff"])?;
+        assert!(staged_diff.contains("+line 18 unstaged"));
+        assert!(!staged_diff.contains("+line 02 staged"));
+        assert!(unstaged_diff.contains("+line 02 staged"));
+        assert!(!unstaged_diff.contains("+line 18 unstaged"));
+
+        fs::remove_dir_all(repository_path)?;
+
+        Ok(())
+    }
+
     fn create_test_repository(name: &str) -> Result<std::path::PathBuf, Box<dyn Error>> {
         let repository_path =
             std::env::temp_dir().join(format!("git-workbench-{name}-{}", std::process::id()));
@@ -426,5 +531,89 @@ new file mode 100644
             .status()?;
         assert!(status.success());
         Ok(())
+    }
+
+    fn run_git_output<const N: usize>(
+        repository_path: &Path,
+        args: [&str; N],
+    ) -> Result<String, Box<dyn Error>> {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repository_path)
+            .output()?;
+        assert!(output.status.success());
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    fn write_committed_hunk_fixture(repository_path: &Path) -> Result<(), Box<dyn Error>> {
+        fs::write(repository_path.join("story.txt"), original_hunk_fixture())?;
+        run_git_command(repository_path, ["add", "story.txt"])?;
+        run_git_command(repository_path, ["commit", "-m", "add story"])?;
+        Ok(())
+    }
+
+    fn original_hunk_fixture() -> &'static str {
+        "\
+line 01
+line 02
+line 03
+line 04
+line 05
+line 06
+line 07
+line 08
+line 09
+line 10
+line 11
+line 12
+line 13
+line 14
+line 15
+line 16
+line 17
+line 18
+line 19
+line 20
+"
+    }
+
+    fn changed_hunk_fixture() -> &'static str {
+        "\
+line 01
+line 02 staged
+line 03
+line 04
+line 05
+line 06
+line 07
+line 08
+line 09
+line 10
+line 11
+line 12
+line 13
+line 14
+line 15
+line 16
+line 17
+line 18 unstaged
+line 19
+line 20
+"
+    }
+
+    fn first_hunk_patch() -> &'static str {
+        "\
+diff --git a/story.txt b/story.txt
+--- a/story.txt
++++ b/story.txt
+@@ -1,5 +1,5 @@
+ line 01
+-line 02
++line 02 staged
+ line 03
+ line 04
+ line 05
+"
     }
 }
