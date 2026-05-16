@@ -38,6 +38,7 @@ Implemented on `main`:
 - Multi-repository workspace list with persisted repository snapshots and active repository switching.
 - Workspace batch operations for fetch all, pull selected, and push selected.
 - Repository health panel with dirty, sync, PR/MR, CI, and last-refresh summaries.
+- Company setup profiles for matching self-hosted GitLab remotes to VPN, SSH, and setup notes.
 - Provider account configuration with non-secret metadata in app config.
 - Provider token storage in the OS keychain.
 - Provider API connection testing for configured accounts.
@@ -145,6 +146,6 @@ docs/
 
 ## Next Milestone
 
-The next milestone is company setup profiles:
+The next milestone is keyboard-first navigation:
 
-- Capture GitLab, VPN, and SSH setup notes per profile so company repositories are easier to prepare.
+- Add command-focused keyboard flows for repeated repository, file, branch, and provider work.

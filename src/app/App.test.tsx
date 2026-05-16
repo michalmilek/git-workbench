@@ -142,6 +142,36 @@ describe("App repository health", () => {
     expect(container.textContent).toContain("Pull repo");
     expect(container.textContent).toContain("Pulled selected repository.");
   });
+
+  test("saves a company setup profile and matches it to provider remotes", async () => {
+    repositoryMocks.listProviderRemotes.mockResolvedValue({
+      remotes: [
+        {
+          fetchUrl: "ssh://git@gitlab.company.test/platform/workbench.git",
+          host: "gitlab.company.test",
+          owner: "platform",
+          providerKind: "customGitlab",
+          pushUrl: null,
+          remoteName: "company",
+          repository: "workbench",
+          webUrl: "https://gitlab.company.test/platform/workbench"
+        }
+      ]
+    });
+
+    await openRepository(container, "/repo");
+    await setFieldValue(container, "#company-profile-name", "Platform");
+    await setFieldValue(container, "#company-profile-gitlab-url", "https://gitlab.company.test/platform");
+    await setFieldValue(container, "#company-profile-vpn", "Corp VPN");
+    await setFieldValue(container, "#company-profile-ssh", "gitlab.company.test");
+    await setFieldValue(container, "#company-profile-notes", "Use hardware key");
+    await clickButton(container, "Save profile");
+
+    expect(companyProfilesText(container)).toContain("Matched: Platform");
+    expect(companyProfilesText(container)).toContain("Corp VPN");
+    expect(companyProfilesText(container)).toContain("gitlab.company.test");
+    expect(companyProfilesText(container)).toContain("Use hardware key");
+  });
 });
 
 function installMemoryLocalStorage() {
@@ -192,7 +222,7 @@ function resetRepositoryMocks() {
 async function openRepository(container: HTMLElement, path: string) {
   await act(async () => {
     const input = requiredElement<HTMLInputElement>(container.querySelector("#repository-path"));
-    input.value = path;
+    setNativeFieldValue(input, path);
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
   });
@@ -219,6 +249,28 @@ async function clickCheckbox(container: HTMLElement, label: string) {
   await flushReactWork();
 }
 
+async function setFieldValue(container: HTMLElement, selector: string, value: string) {
+  await act(async () => {
+    const field = requiredElement<HTMLInputElement | HTMLTextAreaElement>(container.querySelector(selector));
+    setNativeFieldValue(field, value);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    field.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
+  await flushReactWork();
+}
+
+function setNativeFieldValue(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
+  const prototype = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+
+  if (descriptor === undefined || descriptor.set === undefined) {
+    throw new Error("Expected a native field value setter.");
+  }
+
+  descriptor.set.call(field, value);
+}
+
 async function flushReactWork() {
   await act(async () => {
     await Promise.resolve();
@@ -238,6 +290,10 @@ function repositoryHealthText(container: HTMLElement): string {
 
 function providerWorkItemDetailsText(container: HTMLElement): string {
   return requiredElement(container.querySelector("[data-testid='provider-work-item-details-panel']")).textContent ?? "";
+}
+
+function companyProfilesText(container: HTMLElement): string {
+  return requiredElement(container.querySelector("[data-testid='company-profiles-panel']")).textContent ?? "";
 }
 
 function requiredElement<T extends Element>(element: T | null): T {

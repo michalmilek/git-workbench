@@ -43,6 +43,7 @@ The repository already includes:
 - Multi-repository workspace list with persisted repository snapshots and active repository switching.
 - Workspace batch operations for fetch all, pull selected, and push selected.
 - Repository health panel with dirty, sync, PR/MR, CI, and last-refresh summaries.
+- Company setup profiles for matching self-hosted GitLab remotes to VPN, SSH, and setup notes.
 - Persistent command log stored in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
 
@@ -89,6 +90,7 @@ These items are already implemented on `main`:
 - Multi-repository workspace list with persisted repository snapshots, branch/sync/change summaries, and active repository switching.
 - Workspace batch operations for fetch all, pull selected, and push selected.
 - Repository health panel with dirty, sync, PR/MR, CI, and last-refresh summaries.
+- Company setup profiles for GitLab, VPN, and SSH setup metadata.
 - Latest operation result/error display with command, stdout, and stderr.
 - Persistent command log stored in localStorage.
 - Frontend tests for repository summaries, recents, commit validation, and Tauri invoke payloads.
@@ -112,7 +114,7 @@ Goal: turn the current shell into the first useful desktop Git client.
 - Done: show operation result/error details and command output for each Git action.
 - Done: live progress logs for long-running Git operations.
 
-Recommended next milestone: add company setup profiles for GitLab, VPN, and SSH.
+Recommended next milestone: add keyboard-first navigation for repeated workflows.
 
 ## P1: Daily Branch Workflows
 
@@ -174,8 +176,8 @@ Goal: build the features that make the app clearly better than a standard Git GU
 - Done: add a repository health panel with dirty state, ahead/behind counts, CI status, open PR/MR state, and last refresh time.
 - Done: add provider-neutral PR/MR views across GitHub and GitLab.
 - Done: add batch operations: fetch all, pull selected, push selected.
-- Next: add profiles for company GitLab, VPN, and SSH setups.
-- Add keyboard-first navigation for repeated workflows.
+- Done: add profiles for company GitLab, VPN, and SSH setups.
+- Next: add keyboard-first navigation for repeated workflows.
 
 ## Later Or Explicitly Out Of Scope For Now
 
@@ -225,4 +227,5 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 21. Done: repository health panel.
 22. Done: provider-neutral PR/MR views.
 23. Done: batch repository operations.
-24. Next: company GitLab, VPN, and SSH setup profiles.
+24. Done: company GitLab, VPN, and SSH setup profiles.
+25. Next: keyboard-first navigation.
