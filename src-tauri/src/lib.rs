@@ -19,6 +19,7 @@ mod provider_work_items;
 
 use git::GitOperationResult;
 use git::branch::BranchList;
+use git::conflict::ConflictState;
 use git::history::{CommitDetails, CommitSummary};
 use git::operation_preview::OperationPreview;
 use git::operations::FileDiff;
@@ -117,6 +118,42 @@ fn preview_rebase(
 }
 
 #[tauri::command]
+fn get_conflict_state(repository_path: &str) -> Result<ConflictState, OperationError> {
+    git::conflict::read_conflict_state(std::path::Path::new(repository_path))
+}
+
+#[tauri::command]
+fn run_merge(
+    repository_path: &str,
+    source_branch: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::conflict::run_merge(std::path::Path::new(repository_path), source_branch)
+}
+
+#[tauri::command]
+fn run_rebase(
+    repository_path: &str,
+    target_branch: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::conflict::run_rebase(std::path::Path::new(repository_path), target_branch)
+}
+
+#[tauri::command]
+fn abort_merge(repository_path: &str) -> Result<GitOperationResult, OperationError> {
+    git::conflict::abort_merge(std::path::Path::new(repository_path))
+}
+
+#[tauri::command]
+fn abort_rebase(repository_path: &str) -> Result<GitOperationResult, OperationError> {
+    git::conflict::abort_rebase(std::path::Path::new(repository_path))
+}
+
+#[tauri::command]
+fn continue_rebase(repository_path: &str) -> Result<GitOperationResult, OperationError> {
+    git::conflict::continue_rebase(std::path::Path::new(repository_path))
+}
+
+#[tauri::command]
 fn get_commit_details(
     repository_path: &str,
     commit_oid: &str,
@@ -205,6 +242,12 @@ pub fn run() -> tauri::Result<()> {
             list_provider_remotes,
             preview_merge,
             preview_rebase,
+            get_conflict_state,
+            run_merge,
+            run_rebase,
+            abort_merge,
+            abort_rebase,
+            continue_rebase,
             get_commit_details,
             checkout_branch,
             create_branch,

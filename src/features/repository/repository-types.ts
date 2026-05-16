@@ -14,6 +14,7 @@ export type StatusFile = {
   path: string;
   indexStatus: GitFileStatus;
   worktreeStatus: GitFileStatus;
+  conflict: boolean;
 };
 
 export type RepositoryStatus = {
@@ -22,6 +23,23 @@ export type RepositoryStatus = {
   ahead: number;
   behind: number;
   files: StatusFile[];
+};
+
+export type ConflictOperation = "none" | "merge" | "rebase";
+
+export type ConflictFile = {
+  path: string;
+  indexStatus: GitFileStatus;
+  worktreeStatus: GitFileStatus;
+};
+
+export type ConflictState = {
+  operation: ConflictOperation;
+  files: ConflictFile[];
+  canAbortMerge: boolean;
+  canAbortRebase: boolean;
+  canContinueRebase: boolean;
+  message: string;
 };
 
 export type ProviderKind = "github" | "gitlab" | "customGitlab" | "unknown";

@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { createRepositoryClient, getBrowserRepositoryClient } from "./repository-client";
 import type {
   BranchList,
+  ConflictState,
   FileDiff,
   GitOperationResult,
   OperationPreview,
@@ -30,12 +31,19 @@ describe("createRepositoryClient", () => {
 
     expect(client).toEqual(
       expect.objectContaining({
+        abortMerge: expect.any(Function),
+        abortRebase: expect.any(Function),
+        continueRebase: expect.any(Function),
+        getConflictState: expect.any(Function),
         previewMerge: expect.any(Function),
-        previewRebase: expect.any(Function)
+        previewRebase: expect.any(Function),
+        runMerge: expect.any(Function),
+        runRebase: expect.any(Function)
       })
     );
 
     await client.getRepositoryStatus("/repo");
+    await client.getConflictState("/repo");
     await client.listProviderRemotes("/repo");
     await client.listProviderWorkItems("/repo");
     await client.getFileDiff({ filePath: "src/App.tsx", repositoryPath: "/repo", staged: true });
@@ -54,6 +62,11 @@ describe("createRepositoryClient", () => {
     await client.getCommitDetails({ commitOid: "abc1234", repositoryPath: "/repo" });
     await client.previewMerge({ repositoryPath: "/repo", sourceBranch: "feature/operation-previews" });
     await client.previewRebase({ repositoryPath: "/repo", targetBranch: "origin/main" });
+    await client.runMerge({ repositoryPath: "/repo", sourceBranch: "feature/operation-previews" });
+    await client.runRebase({ repositoryPath: "/repo", targetBranch: "origin/main" });
+    await client.abortMerge({ repositoryPath: "/repo" });
+    await client.abortRebase({ repositoryPath: "/repo" });
+    await client.continueRebase({ repositoryPath: "/repo" });
     await client.createStash({ message: "wip changes", repositoryPath: "/repo" });
     await client.applyStash({ repositoryPath: "/repo", stashRef: "stash@{0}" });
     await client.popStash({ repositoryPath: "/repo", stashRef: "stash@{1}" });
@@ -70,6 +83,7 @@ describe("createRepositoryClient", () => {
 
     expect(calls).toEqual([
       { args: { repositoryPath: "/repo" }, command: "get_repository_status" },
+      { args: { repositoryPath: "/repo" }, command: "get_conflict_state" },
       { args: { repositoryPath: "/repo" }, command: "list_provider_remotes" },
       { args: { repositoryPath: "/repo" }, command: "list_provider_work_items" },
       {
@@ -97,6 +111,14 @@ describe("createRepositoryClient", () => {
         command: "preview_merge"
       },
       { args: { repositoryPath: "/repo", targetBranch: "origin/main" }, command: "preview_rebase" },
+      {
+        args: { repositoryPath: "/repo", sourceBranch: "feature/operation-previews" },
+        command: "run_merge"
+      },
+      { args: { repositoryPath: "/repo", targetBranch: "origin/main" }, command: "run_rebase" },
+      { args: { repositoryPath: "/repo" }, command: "abort_merge" },
+      { args: { repositoryPath: "/repo" }, command: "abort_rebase" },
+      { args: { repositoryPath: "/repo" }, command: "continue_rebase" },
       { args: { message: "wip changes", repositoryPath: "/repo" }, command: "create_stash" },
       { args: { repositoryPath: "/repo", stashRef: "stash@{0}" }, command: "apply_stash" },
       { args: { repositoryPath: "/repo", stashRef: "stash@{1}" }, command: "pop_stash" },
@@ -125,14 +147,28 @@ describe("browser repository client", () => {
 
     expect(client).toEqual(
       expect.objectContaining({
+        abortMerge: expect.any(Function),
+        abortRebase: expect.any(Function),
+        continueRebase: expect.any(Function),
+        getConflictState: expect.any(Function),
         previewMerge: expect.any(Function),
-        previewRebase: expect.any(Function)
+        previewRebase: expect.any(Function),
+        runMerge: expect.any(Function),
+        runRebase: expect.any(Function)
       })
     );
 
     await expect(client.getRepositoryStatus("/repo")).resolves.toMatchObject({
       branch: "browser-preview",
       files: expect.arrayContaining([expect.objectContaining({ path: "src/app/App.tsx" })])
+    });
+    await expect(client.getConflictState("/repo")).resolves.toEqual({
+      canAbortMerge: false,
+      canAbortRebase: false,
+      canContinueRebase: false,
+      files: [],
+      message: "Browser preview has no merge or rebase conflicts.",
+      operation: "none"
     });
     await expect(client.listProviderRemotes("/repo")).resolves.toEqual({
       remotes: [
@@ -291,6 +327,31 @@ describe("browser repository client", () => {
       sourceBranch: "browser-preview",
       targetBranch: "origin/main"
     });
+    await expect(client.runMerge({ repositoryPath: "/repo", sourceBranch: "feature/demo-branch" })).resolves.toEqual({
+      command: "git merge feature/demo-branch",
+      stderr: "",
+      stdout: "Open the app through Tauri to run mutating Git commands."
+    });
+    await expect(client.runRebase({ repositoryPath: "/repo", targetBranch: "origin/main" })).resolves.toEqual({
+      command: "git rebase origin/main",
+      stderr: "",
+      stdout: "Open the app through Tauri to run mutating Git commands."
+    });
+    await expect(client.abortMerge({ repositoryPath: "/repo" })).resolves.toEqual({
+      command: "git merge --abort",
+      stderr: "",
+      stdout: "Open the app through Tauri to run mutating Git commands."
+    });
+    await expect(client.abortRebase({ repositoryPath: "/repo" })).resolves.toEqual({
+      command: "git rebase --abort",
+      stderr: "",
+      stdout: "Open the app through Tauri to run mutating Git commands."
+    });
+    await expect(client.continueRebase({ repositoryPath: "/repo" })).resolves.toEqual({
+      command: "git rebase --continue",
+      stderr: "",
+      stdout: "Open the app through Tauri to run mutating Git commands."
+    });
     await expect(client.checkoutBranch({ branchName: "feature/demo-branch", repositoryPath: "/repo" })).resolves.toEqual({
       command: "git checkout feature/demo-branch",
       stderr: "",
@@ -344,6 +405,7 @@ function responseForCommand(
   command: string
 ): Promise<
   | RepositoryStatus
+  | ConflictState
   | FileDiff
   | GitOperationResult
   | OperationPreview
@@ -362,6 +424,17 @@ function responseForCommand(
       branch: "main",
       files: [],
       upstream: null
+    });
+  }
+
+  if (command === "get_conflict_state") {
+    return Promise.resolve({
+      canAbortMerge: false,
+      canAbortRebase: false,
+      canContinueRebase: false,
+      files: [],
+      message: "No merge or rebase conflicts.",
+      operation: "none"
     });
   }
 
