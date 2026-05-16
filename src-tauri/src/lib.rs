@@ -69,18 +69,42 @@ fn commit_changes(
 }
 
 #[tauri::command]
-fn fetch_repository(repository_path: &str) -> Result<GitOperationResult, OperationError> {
-    git::operations::fetch_repository(std::path::Path::new(repository_path))
+fn fetch_repository(
+    app: tauri::AppHandle,
+    repository_path: &str,
+    operation_id: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::operations::fetch_repository_with_events(
+        app,
+        std::path::Path::new(repository_path),
+        operation_id,
+    )
 }
 
 #[tauri::command]
-fn pull_repository(repository_path: &str) -> Result<GitOperationResult, OperationError> {
-    git::operations::pull_repository(std::path::Path::new(repository_path))
+fn pull_repository(
+    app: tauri::AppHandle,
+    repository_path: &str,
+    operation_id: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::operations::pull_repository_with_events(
+        app,
+        std::path::Path::new(repository_path),
+        operation_id,
+    )
 }
 
 #[tauri::command]
-fn push_repository(repository_path: &str) -> Result<GitOperationResult, OperationError> {
-    git::operations::push_repository(std::path::Path::new(repository_path))
+fn push_repository(
+    app: tauri::AppHandle,
+    repository_path: &str,
+    operation_id: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::operations::push_repository_with_events(
+        app,
+        std::path::Path::new(repository_path),
+        operation_id,
+    )
 }
 
 #[tauri::command]
@@ -124,33 +148,67 @@ fn get_conflict_state(repository_path: &str) -> Result<ConflictState, OperationE
 
 #[tauri::command]
 fn run_merge(
+    app: tauri::AppHandle,
     repository_path: &str,
     source_branch: &str,
+    operation_id: &str,
 ) -> Result<GitOperationResult, OperationError> {
-    git::conflict::run_merge(std::path::Path::new(repository_path), source_branch)
+    git::conflict::run_merge_with_events(
+        app,
+        std::path::Path::new(repository_path),
+        source_branch,
+        operation_id,
+    )
 }
 
 #[tauri::command]
 fn run_rebase(
+    app: tauri::AppHandle,
     repository_path: &str,
     target_branch: &str,
+    operation_id: &str,
 ) -> Result<GitOperationResult, OperationError> {
-    git::conflict::run_rebase(std::path::Path::new(repository_path), target_branch)
+    git::conflict::run_rebase_with_events(
+        app,
+        std::path::Path::new(repository_path),
+        target_branch,
+        operation_id,
+    )
 }
 
 #[tauri::command]
-fn abort_merge(repository_path: &str) -> Result<GitOperationResult, OperationError> {
-    git::conflict::abort_merge(std::path::Path::new(repository_path))
+fn abort_merge(
+    app: tauri::AppHandle,
+    repository_path: &str,
+    operation_id: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::conflict::abort_merge_with_events(app, std::path::Path::new(repository_path), operation_id)
 }
 
 #[tauri::command]
-fn abort_rebase(repository_path: &str) -> Result<GitOperationResult, OperationError> {
-    git::conflict::abort_rebase(std::path::Path::new(repository_path))
+fn abort_rebase(
+    app: tauri::AppHandle,
+    repository_path: &str,
+    operation_id: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::conflict::abort_rebase_with_events(
+        app,
+        std::path::Path::new(repository_path),
+        operation_id,
+    )
 }
 
 #[tauri::command]
-fn continue_rebase(repository_path: &str) -> Result<GitOperationResult, OperationError> {
-    git::conflict::continue_rebase(std::path::Path::new(repository_path))
+fn continue_rebase(
+    app: tauri::AppHandle,
+    repository_path: &str,
+    operation_id: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::conflict::continue_rebase_with_events(
+        app,
+        std::path::Path::new(repository_path),
+        operation_id,
+    )
 }
 
 #[tauri::command]

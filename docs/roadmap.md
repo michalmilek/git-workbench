@@ -36,6 +36,7 @@ The repository already includes:
 - Merge and rebase previews with source/target branch, planned command, commits, changed files, and likely conflict files.
 - Merge and rebase execution after explicit preview confirmation.
 - Conflict state display with abort merge, abort rebase, and continue rebase actions.
+- Operation queue with live Git command logs for long-running operations.
 - Persistent command log stored in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
 
@@ -74,6 +75,7 @@ These items are already implemented on `main`:
 - Merge and rebase previews with source/target branch, planned command, commits, changed files, and likely conflict files.
 - Merge and rebase execution after explicit preview confirmation.
 - Conflict state display with abort merge, abort rebase, and continue rebase actions.
+- Operation queue with live Git command logs for long-running operations.
 - Latest operation result/error display with command, stdout, and stderr.
 - Persistent command log stored in localStorage.
 - Frontend tests for repository summaries, recents, commit validation, and Tauri invoke payloads.
@@ -95,9 +97,9 @@ Goal: turn the current shell into the first useful desktop Git client.
 - Done: create commits through the system `git`.
 - Done: fetch, pull, and push through the system `git`.
 - Done: show operation result/error details and command output for each Git action.
-- Not done: live progress logs for long-running Git operations.
+- Done: live progress logs for long-running Git operations.
 
-Recommended next milestone: add hunk-level staging and live progress logs for long-running Git operations.
+Recommended next milestone: add pull and push previews, then hunk-level staging.
 
 ## P1: Daily Branch Workflows
 
@@ -143,7 +145,7 @@ Goal: make risky Git actions understandable before they run and recoverable afte
 - Done: execute rebase only after preview and confirmation.
 - Done: show conflict files and conflict state.
 - Done: add recovery actions for abort merge, abort rebase, and continue rebase.
-- Keep long-running operations visible in an operation queue with live logs.
+- Done: keep long-running operations visible in an operation queue with live logs.
 
 ## P4: Differentiators
 
@@ -198,4 +200,5 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 12. Done: PR/MR list and CI status.
 13. Done: merge and rebase preview.
 14. Done: conflict display and recovery.
-15. Next: live operation queue with logs.
+15. Done: live operation queue with logs.
+16. Next: pull and push previews.

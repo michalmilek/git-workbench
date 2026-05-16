@@ -3,7 +3,10 @@ use std::{fs, path::Path};
 use serde::Serialize;
 
 use crate::{
-    git::command::{GitOperationResult, run_git},
+    git::{
+        command::{GitOperationResult, run_git},
+        operation_stream::run_git_with_events,
+    },
     operation_error::OperationError,
 };
 
@@ -86,9 +89,24 @@ pub fn commit_changes(
 /// # Errors
 ///
 /// Returns an operation error when Git cannot be executed or exits unsuccessfully.
+#[allow(dead_code)]
 pub fn fetch_repository(repository_path: &Path) -> Result<GitOperationResult, OperationError> {
-    let args = vec![String::from("fetch")];
+    let args = fetch_repository_args();
     run_git(repository_path, &args)
+}
+
+/// Fetches from the repository's configured remotes and emits operation events.
+///
+/// # Errors
+///
+/// Returns an operation error when Git cannot be executed or exits unsuccessfully.
+pub fn fetch_repository_with_events(
+    app: tauri::AppHandle,
+    repository_path: &Path,
+    operation_id: &str,
+) -> Result<GitOperationResult, OperationError> {
+    let args = fetch_repository_args();
+    run_git_with_events(app, repository_path, &args, operation_id)
 }
 
 /// Pulls from the current branch's configured upstream.
@@ -96,9 +114,24 @@ pub fn fetch_repository(repository_path: &Path) -> Result<GitOperationResult, Op
 /// # Errors
 ///
 /// Returns an operation error when Git cannot be executed or exits unsuccessfully.
+#[allow(dead_code)]
 pub fn pull_repository(repository_path: &Path) -> Result<GitOperationResult, OperationError> {
-    let args = vec![String::from("pull")];
+    let args = pull_repository_args();
     run_git(repository_path, &args)
+}
+
+/// Pulls from the current branch's configured upstream and emits operation events.
+///
+/// # Errors
+///
+/// Returns an operation error when Git cannot be executed or exits unsuccessfully.
+pub fn pull_repository_with_events(
+    app: tauri::AppHandle,
+    repository_path: &Path,
+    operation_id: &str,
+) -> Result<GitOperationResult, OperationError> {
+    let args = pull_repository_args();
+    run_git_with_events(app, repository_path, &args, operation_id)
 }
 
 /// Pushes the current branch to its configured upstream.
@@ -106,9 +139,24 @@ pub fn pull_repository(repository_path: &Path) -> Result<GitOperationResult, Ope
 /// # Errors
 ///
 /// Returns an operation error when Git cannot be executed or exits unsuccessfully.
+#[allow(dead_code)]
 pub fn push_repository(repository_path: &Path) -> Result<GitOperationResult, OperationError> {
-    let args = vec![String::from("push")];
+    let args = push_repository_args();
     run_git(repository_path, &args)
+}
+
+/// Pushes the current branch to its configured upstream and emits operation events.
+///
+/// # Errors
+///
+/// Returns an operation error when Git cannot be executed or exits unsuccessfully.
+pub fn push_repository_with_events(
+    app: tauri::AppHandle,
+    repository_path: &Path,
+    operation_id: &str,
+) -> Result<GitOperationResult, OperationError> {
+    let args = push_repository_args();
+    run_git_with_events(app, repository_path, &args, operation_id)
 }
 
 fn diff_args(file_path: &str, staged: bool) -> Vec<String> {
@@ -150,6 +198,18 @@ fn commit_args(summary: &str, body: Option<String>, amend: bool) -> Vec<String> 
         args.push(body_text);
     }
     args
+}
+
+fn fetch_repository_args() -> Vec<String> {
+    vec![String::from("fetch")]
+}
+
+fn pull_repository_args() -> Vec<String> {
+    vec![String::from("pull")]
+}
+
+fn push_repository_args() -> Vec<String> {
+    vec![String::from("push")]
 }
 
 fn is_binary_diff(text: &str) -> bool {
@@ -216,10 +276,14 @@ mod tests {
     use std::{error::Error, fs, path::Path, process::Command};
 
     use super::{
-        commit_args, commit_changes, diff_args, get_file_diff, is_binary_diff,
-        render_untracked_text_diff, stage_file, unstage_file,
+        commit_args, commit_changes, diff_args, fetch_repository_args, get_file_diff,
+        is_binary_diff, pull_repository_args, push_repository_args, render_untracked_text_diff,
+        stage_file, unstage_file,
     };
-    use crate::git::status::{GitFileStatus, read_repository_status};
+    use crate::git::{
+        operation_stream::command_text,
+        status::{GitFileStatus, read_repository_status},
+    };
 
     #[test]
     fn builds_unstaged_diff_args() {
@@ -262,6 +326,13 @@ mod tests {
             commit_args("Update local Git core", Some(String::new()), false),
             ["commit", "-m", "Update local Git core"]
         );
+    }
+
+    #[test]
+    fn builds_streamed_repository_operation_command_text() {
+        assert_eq!(command_text(&fetch_repository_args()), "git fetch");
+        assert_eq!(command_text(&pull_repository_args()), "git pull");
+        assert_eq!(command_text(&push_repository_args()), "git push");
     }
 
     #[test]

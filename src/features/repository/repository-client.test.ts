@@ -50,9 +50,9 @@ describe("createRepositoryClient", () => {
     await client.stageFile({ filePath: "src/App.tsx", repositoryPath: "/repo" });
     await client.unstageFile({ filePath: "src/App.tsx", repositoryPath: "/repo" });
     await client.commitChanges({ amend: false, body: "", repositoryPath: "/repo", summary: "commit" });
-    await client.fetchRepository({ repositoryPath: "/repo" });
-    await client.pullRepository({ repositoryPath: "/repo" });
-    await client.pushRepository({ repositoryPath: "/repo" });
+    await client.fetchRepository({ operationId: "operation-fetch", repositoryPath: "/repo" });
+    await client.pullRepository({ operationId: "operation-pull", repositoryPath: "/repo" });
+    await client.pushRepository({ operationId: "operation-push", repositoryPath: "/repo" });
     await client.listBranches("/repo");
     await client.checkoutBranch({ branchName: "feature/worktree", repositoryPath: "/repo" });
     await client.createBranch({ branchName: "feature/new", repositoryPath: "/repo" });
@@ -62,11 +62,15 @@ describe("createRepositoryClient", () => {
     await client.getCommitDetails({ commitOid: "abc1234", repositoryPath: "/repo" });
     await client.previewMerge({ repositoryPath: "/repo", sourceBranch: "feature/operation-previews" });
     await client.previewRebase({ repositoryPath: "/repo", targetBranch: "origin/main" });
-    await client.runMerge({ repositoryPath: "/repo", sourceBranch: "feature/operation-previews" });
-    await client.runRebase({ repositoryPath: "/repo", targetBranch: "origin/main" });
-    await client.abortMerge({ repositoryPath: "/repo" });
-    await client.abortRebase({ repositoryPath: "/repo" });
-    await client.continueRebase({ repositoryPath: "/repo" });
+    await client.runMerge({
+      operationId: "operation-merge",
+      repositoryPath: "/repo",
+      sourceBranch: "feature/operation-previews"
+    });
+    await client.runRebase({ operationId: "operation-rebase", repositoryPath: "/repo", targetBranch: "origin/main" });
+    await client.abortMerge({ operationId: "operation-abort-merge", repositoryPath: "/repo" });
+    await client.abortRebase({ operationId: "operation-abort-rebase", repositoryPath: "/repo" });
+    await client.continueRebase({ operationId: "operation-continue-rebase", repositoryPath: "/repo" });
     await client.createStash({ message: "wip changes", repositoryPath: "/repo" });
     await client.applyStash({ repositoryPath: "/repo", stashRef: "stash@{0}" });
     await client.popStash({ repositoryPath: "/repo", stashRef: "stash@{1}" });
@@ -96,9 +100,9 @@ describe("createRepositoryClient", () => {
         args: { amend: false, body: "", repositoryPath: "/repo", summary: "commit" },
         command: "commit_changes"
       },
-      { args: { repositoryPath: "/repo" }, command: "fetch_repository" },
-      { args: { repositoryPath: "/repo" }, command: "pull_repository" },
-      { args: { repositoryPath: "/repo" }, command: "push_repository" },
+      { args: { operationId: "operation-fetch", repositoryPath: "/repo" }, command: "fetch_repository" },
+      { args: { operationId: "operation-pull", repositoryPath: "/repo" }, command: "pull_repository" },
+      { args: { operationId: "operation-push", repositoryPath: "/repo" }, command: "push_repository" },
       { args: { repositoryPath: "/repo" }, command: "list_branches" },
       { args: { branchName: "feature/worktree", repositoryPath: "/repo" }, command: "checkout_branch" },
       { args: { branchName: "feature/new", repositoryPath: "/repo" }, command: "create_branch" },
@@ -112,13 +116,19 @@ describe("createRepositoryClient", () => {
       },
       { args: { repositoryPath: "/repo", targetBranch: "origin/main" }, command: "preview_rebase" },
       {
-        args: { repositoryPath: "/repo", sourceBranch: "feature/operation-previews" },
+        args: { operationId: "operation-merge", repositoryPath: "/repo", sourceBranch: "feature/operation-previews" },
         command: "run_merge"
       },
-      { args: { repositoryPath: "/repo", targetBranch: "origin/main" }, command: "run_rebase" },
-      { args: { repositoryPath: "/repo" }, command: "abort_merge" },
-      { args: { repositoryPath: "/repo" }, command: "abort_rebase" },
-      { args: { repositoryPath: "/repo" }, command: "continue_rebase" },
+      {
+        args: { operationId: "operation-rebase", repositoryPath: "/repo", targetBranch: "origin/main" },
+        command: "run_rebase"
+      },
+      { args: { operationId: "operation-abort-merge", repositoryPath: "/repo" }, command: "abort_merge" },
+      { args: { operationId: "operation-abort-rebase", repositoryPath: "/repo" }, command: "abort_rebase" },
+      {
+        args: { operationId: "operation-continue-rebase", repositoryPath: "/repo" },
+        command: "continue_rebase"
+      },
       { args: { message: "wip changes", repositoryPath: "/repo" }, command: "create_stash" },
       { args: { repositoryPath: "/repo", stashRef: "stash@{0}" }, command: "apply_stash" },
       { args: { repositoryPath: "/repo", stashRef: "stash@{1}" }, command: "pop_stash" },
@@ -327,27 +337,35 @@ describe("browser repository client", () => {
       sourceBranch: "browser-preview",
       targetBranch: "origin/main"
     });
-    await expect(client.runMerge({ repositoryPath: "/repo", sourceBranch: "feature/demo-branch" })).resolves.toEqual({
+    await expect(
+      client.runMerge({ operationId: "operation-merge", repositoryPath: "/repo", sourceBranch: "feature/demo-branch" })
+    ).resolves.toEqual({
       command: "git merge feature/demo-branch",
       stderr: "",
       stdout: "Open the app through Tauri to run mutating Git commands."
     });
-    await expect(client.runRebase({ repositoryPath: "/repo", targetBranch: "origin/main" })).resolves.toEqual({
+    await expect(
+      client.runRebase({ operationId: "operation-rebase", repositoryPath: "/repo", targetBranch: "origin/main" })
+    ).resolves.toEqual({
       command: "git rebase origin/main",
       stderr: "",
       stdout: "Open the app through Tauri to run mutating Git commands."
     });
-    await expect(client.abortMerge({ repositoryPath: "/repo" })).resolves.toEqual({
+    await expect(client.abortMerge({ operationId: "operation-abort-merge", repositoryPath: "/repo" })).resolves.toEqual({
       command: "git merge --abort",
       stderr: "",
       stdout: "Open the app through Tauri to run mutating Git commands."
     });
-    await expect(client.abortRebase({ repositoryPath: "/repo" })).resolves.toEqual({
+    await expect(
+      client.abortRebase({ operationId: "operation-abort-rebase", repositoryPath: "/repo" })
+    ).resolves.toEqual({
       command: "git rebase --abort",
       stderr: "",
       stdout: "Open the app through Tauri to run mutating Git commands."
     });
-    await expect(client.continueRebase({ repositoryPath: "/repo" })).resolves.toEqual({
+    await expect(
+      client.continueRebase({ operationId: "operation-continue-rebase", repositoryPath: "/repo" })
+    ).resolves.toEqual({
       command: "git rebase --continue",
       stderr: "",
       stdout: "Open the app through Tauri to run mutating Git commands."

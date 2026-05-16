@@ -31,6 +31,7 @@ Implemented on `main`:
 - Merge and rebase previews with source/target branch, planned command, commits, changed files, and likely conflict files.
 - Merge and rebase execution after explicit preview confirmation.
 - Conflict state display with abort merge, abort rebase, and continue rebase actions.
+- Operation queue with live Git command logs for long-running operations.
 - Provider remote detection for GitHub, GitLab.com, and self-hosted GitLab-style hosts.
 - Provider account configuration with non-secret metadata in app config.
 - Provider token storage in the OS keychain.
@@ -46,7 +47,7 @@ Not implemented yet:
 
 - Hunk-level staging.
 - Full PR/MR review and inline commenting.
-- Live operation queue with streaming logs.
+- Pull and push previews.
 
 See [docs/roadmap.md](docs/roadmap.md) for the active roadmap.
 
@@ -141,5 +142,5 @@ docs/
 
 The next milestone is safe complex operations:
 
-- Add a live operation queue with streaming logs for long-running Git commands.
 - Add previews before pull and push.
+- Add hunk-level staging for supported text diffs.

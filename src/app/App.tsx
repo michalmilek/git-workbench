@@ -19,6 +19,7 @@ import {
   IconTrash,
   IconUpload
 } from "@tabler/icons-react";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -34,6 +35,15 @@ import {
   type CommandLogEntry
 } from "@/features/repository/command-log";
 import { isCommitSummaryValid } from "@/features/repository/commit-validation";
+import {
+  applyOperationEvent,
+  createOperationQueueEntry,
+  finishOperationQueueEntry,
+  type GitOperationEventPayload,
+  type OperationLogStream,
+  type OperationQueueEntry,
+  type OperationQueueStatus
+} from "@/features/repository/operation-queue";
 import { trustedProviderUrl } from "@/features/repository/provider-links";
 import {
   abortMerge,
@@ -200,6 +210,7 @@ export function App() {
   const [stashMessage, setStashMessage] = useState("");
   const [selectedStashRef, setSelectedStashRef] = useState<string | null>(null);
   const [commandLog, setCommandLog] = useState(readCommandLogEntries);
+  const [operationQueue, setOperationQueue] = useState<OperationQueueEntry[]>([]);
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [feedback, setFeedback] = useState<OperationFeedback>(null);
   const repositoryLoadRequestId = useRef(0);
@@ -213,6 +224,7 @@ export function App() {
   const commitDetailsRequestId = useRef(0);
   const operationPreviewRequestId = useRef(0);
   const commandLogId = useRef(0);
+  const operationQueueId = useRef(0);
 
   const summary = useMemo(() => (status === null ? null : summarizeRepositoryStatus(status)), [status]);
   const filteredHistory = useMemo(() => filterCommitHistory(history, historyFilter), [history, historyFilter]);
@@ -261,6 +273,33 @@ export function App() {
           setProviderAccountsLoading(false);
         }
       });
+  }, []);
+
+  useEffect(() => {
+    if (!hasTauriRuntime()) {
+      return;
+    }
+
+    let active = true;
+    let unlisten: (() => void) | null = null;
+
+    void listen<GitOperationEventPayload>("git-operation", (event) => {
+      setOperationQueue((entries) => applyOperationEvent(entries, event.payload));
+    }).then((nextUnlisten) => {
+      if (active) {
+        unlisten = nextUnlisten;
+        return;
+      }
+
+      nextUnlisten();
+    });
+
+    return () => {
+      active = false;
+      if (unlisten !== null) {
+        unlisten();
+      }
+    };
   }, []);
 
   async function openRepository() {
@@ -639,26 +678,18 @@ export function App() {
     }
   }
 
-  async function runRepositoryOperation(action: SyncAction) {
+  async function runQueuedRepositoryOperation(action: SyncAction) {
     if (repositoryPath === null) {
       return;
     }
 
-    invalidateDiffRequests();
-    setBusyAction(action);
-
-    try {
-      const result = await runSyncCommand(action, repositoryPath);
-      setFeedback({ kind: "result", result });
-      recordOperationResult(syncOperationLabel(action), result);
-      await loadRepositoryStatus(repositoryPath, selectedFilePath);
-    } catch (error) {
-      const operationError = describeOperationError(error);
-      setFeedback({ kind: "error", error: operationError });
-      recordOperationError(syncOperationLabel(action), operationError);
-    } finally {
-      setBusyAction(null);
-    }
+    await runQueuedGitOperation({
+      action,
+      command: syncOperationCommand(action),
+      execute: (operationId) => runSyncCommand(action, repositoryPath, operationId),
+      operation: syncOperationLabel(action),
+      repository: repositoryPath
+    });
   }
 
   async function checkoutRepositoryBranch(branchName: string) {
@@ -771,7 +802,7 @@ export function App() {
     }
   }
 
-  async function runPreviewedOperation(preview: OperationPreview) {
+  async function runQueuedPreviewedOperation(preview: OperationPreview) {
     if (repositoryPath === null) {
       return;
     }
@@ -783,43 +814,59 @@ export function App() {
 
     const action = preview.kind === "merge" ? "run-merge" : "run-rebase";
     const operation = preview.kind === "merge" ? "Run merge" : "Run rebase";
-    invalidateDiffRequests();
-    setBusyAction(action);
-
-    try {
-      const result =
-        preview.kind === "merge"
-          ? await runMerge({ repositoryPath, sourceBranch: preview.sourceBranch })
-          : await runRebase({ repositoryPath, targetBranch: preview.targetBranch });
-      setFeedback({ kind: "result", result });
-      recordOperationResult(operation, result);
-    } catch (error) {
-      const operationError = describeOperationError(error);
-      setFeedback({ kind: "error", error: operationError });
-      recordOperationError(operation, operationError);
-    } finally {
-      await loadRepositoryStatus(repositoryPath, selectedFilePath);
-    }
+    await runQueuedGitOperation({
+      action,
+      command: preview.command,
+      execute: (operationId) => runPreviewedCommand(preview, repositoryPath, operationId),
+      operation,
+      repository: repositoryPath
+    });
   }
 
-  async function runConflictRecovery(action: ConflictRecoveryAction) {
+  async function runQueuedConflictRecovery(action: ConflictRecoveryAction) {
     if (repositoryPath === null) {
       return;
     }
 
+    await runQueuedGitOperation({
+      action,
+      command: conflictRecoveryCommand(action),
+      execute: (operationId) => runConflictRecoveryCommand(action, repositoryPath, operationId),
+      operation: conflictRecoveryLabel(action),
+      repository: repositoryPath
+    });
+  }
+
+  async function runQueuedGitOperation({
+    action,
+    command,
+    execute,
+    operation,
+    repository
+  }: {
+    action: Exclude<BusyAction, null>;
+    command: string;
+    execute(operationId: string): Promise<GitOperationResult>;
+    operation: string;
+    repository: string;
+  }) {
+    const operationId = createOperationQueueId();
+    startOperationQueueEntry(operationId, operation, command);
     invalidateDiffRequests();
     setBusyAction(action);
 
     try {
-      const result = await runConflictRecoveryCommand(action, repositoryPath);
+      const result = await execute(operationId);
       setFeedback({ kind: "result", result });
-      recordOperationResult(conflictRecoveryLabel(action), result);
+      finishQueuedOperation(operationId, "success", result);
+      recordOperationResult(operation, result);
     } catch (error) {
       const operationError = describeOperationError(error);
       setFeedback({ kind: "error", error: operationError });
-      recordOperationError(conflictRecoveryLabel(action), operationError);
+      finishQueuedOperation(operationId, "error", operationErrorResult(operationError, command));
+      recordOperationError(operation, operationError);
     } finally {
-      await loadRepositoryStatus(repositoryPath, selectedFilePath);
+      await loadRepositoryStatus(repository, selectedFilePath);
     }
   }
 
@@ -1058,6 +1105,19 @@ export function App() {
   function createCommandLogId(): string {
     commandLogId.current += 1;
     return `${Date.now()}-${commandLogId.current}`;
+  }
+
+  function createOperationQueueId(): string {
+    operationQueueId.current += 1;
+    return `${Date.now()}-${operationQueueId.current}`;
+  }
+
+  function startOperationQueueEntry(id: string, operation: string, command: string) {
+    setOperationQueue((entries) => [createOperationQueueEntry({ command, id, operation }), ...entries]);
+  }
+
+  function finishQueuedOperation(id: string, status: OperationQueueStatus, result: GitOperationResult) {
+    setOperationQueue((entries) => finishOperationQueueEntry(entries, id, status, result));
   }
 
   function invalidateDiffRequests() {
@@ -1749,7 +1809,7 @@ export function App() {
             <div className="grid grid-cols-3 gap-2">
               <Button
                 disabled={busyAction !== null || repositoryPath === null}
-                onClick={() => void runRepositoryOperation("fetch")}
+                onClick={() => void runQueuedRepositoryOperation("fetch")}
                 size="sm"
                 type="button"
                 variant="secondary"
@@ -1759,7 +1819,7 @@ export function App() {
               </Button>
               <Button
                 disabled={busyAction !== null || repositoryPath === null}
-                onClick={() => void runRepositoryOperation("pull")}
+                onClick={() => void runQueuedRepositoryOperation("pull")}
                 size="sm"
                 type="button"
                 variant="secondary"
@@ -1769,7 +1829,7 @@ export function App() {
               </Button>
               <Button
                 disabled={busyAction !== null || repositoryPath === null}
-                onClick={() => void runRepositoryOperation("push")}
+                onClick={() => void runQueuedRepositoryOperation("push")}
                 size="sm"
                 type="button"
                 variant="secondary"
@@ -1780,9 +1840,11 @@ export function App() {
             </div>
           </div>
 
+          <OperationQueuePanel entries={operationQueue} />
+
           <OperationPreviewPanel
             busyAction={busyAction}
-            onRunPreviewedOperation={(preview) => void runPreviewedOperation(preview)}
+            onRunPreviewedOperation={(preview) => void runQueuedPreviewedOperation(preview)}
             preview={operationPreview}
             repositoryOpened={repositoryPath !== null}
           />
@@ -1790,7 +1852,7 @@ export function App() {
           <ConflictStatePanel
             busyAction={busyAction}
             conflictState={conflictState}
-            onRecovery={(action) => void runConflictRecovery(action)}
+            onRecovery={(action) => void runQueuedConflictRecovery(action)}
             repositoryOpened={repositoryPath !== null}
           />
 
@@ -2042,16 +2104,28 @@ function isCommitFilterMatch(commit: CommitSummary, query: string): boolean {
   );
 }
 
-async function runSyncCommand(action: "fetch" | "pull" | "push", repositoryPath: string): Promise<GitOperationResult> {
+async function runSyncCommand(action: "fetch" | "pull" | "push", repositoryPath: string, operationId: string): Promise<GitOperationResult> {
+  const args = { operationId, repositoryPath };
+
   if (action === "fetch") {
-    return fetchRepository({ repositoryPath });
+    return fetchRepository(args);
   }
 
   if (action === "pull") {
-    return pullRepository({ repositoryPath });
+    return pullRepository(args);
   }
 
-  return pushRepository({ repositoryPath });
+  return pushRepository(args);
+}
+
+function runPreviewedCommand(preview: OperationPreview, repositoryPath: string, operationId: string): Promise<GitOperationResult> {
+  if (preview.kind === "merge") {
+    const args = { operationId, repositoryPath, sourceBranch: preview.sourceBranch };
+    return runMerge(args);
+  }
+
+  const args = { operationId, repositoryPath, targetBranch: preview.targetBranch };
+  return runRebase(args);
 }
 
 function operationPreviewResult(preview: OperationPreview): GitOperationResult {
@@ -2087,17 +2161,20 @@ async function runStashCommand(
 
 async function runConflictRecoveryCommand(
   action: ConflictRecoveryAction,
-  repositoryPath: string
+  repositoryPath: string,
+  operationId: string
 ): Promise<GitOperationResult> {
+  const args = { operationId, repositoryPath };
+
   if (action === "abort-merge") {
-    return abortMerge({ repositoryPath });
+    return abortMerge(args);
   }
 
   if (action === "abort-rebase") {
-    return abortRebase({ repositoryPath });
+    return abortRebase(args);
   }
 
-  return continueRebase({ repositoryPath });
+  return continueRebase(args);
 }
 
 function syncOperationLabel(action: SyncAction): string {
@@ -2110,6 +2187,18 @@ function syncOperationLabel(action: SyncAction): string {
   }
 
   return "Push";
+}
+
+function syncOperationCommand(action: SyncAction): string {
+  if (action === "fetch") {
+    return "git fetch";
+  }
+
+  if (action === "pull") {
+    return "git pull";
+  }
+
+  return "git push";
 }
 
 function stashOperationLabel(action: Exclude<StashAction, "create-stash">): string {
@@ -2134,6 +2223,26 @@ function conflictRecoveryLabel(action: ConflictRecoveryAction): string {
   }
 
   return "Continue rebase";
+}
+
+function conflictRecoveryCommand(action: ConflictRecoveryAction): string {
+  if (action === "abort-merge") {
+    return "git merge --abort";
+  }
+
+  if (action === "abort-rebase") {
+    return "git rebase --abort";
+  }
+
+  return "git rebase --continue";
+}
+
+function operationErrorResult(error: OperationErrorDetails, fallbackCommand: string): GitOperationResult {
+  return {
+    command: error.command ?? fallbackCommand,
+    stderr: error.stderr ?? error.message,
+    stdout: error.stdout ?? ""
+  };
 }
 
 function conflictOperationLabel(operation: ConflictState["operation"]): string {
@@ -2230,6 +2339,90 @@ function BranchOperationControls({
       )}
     </div>
   );
+}
+
+function OperationQueuePanel({ entries }: { entries: OperationQueueEntry[] }) {
+  const visibleEntries = entries.slice(0, 8);
+
+  return (
+    <div className="mt-4 flex flex-col gap-3 rounded-md border bg-background p-3 text-sm" data-testid="operation-queue-panel">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 font-medium">
+          <IconHistory aria-hidden="true" className="size-4 shrink-0" />
+          Operation queue
+        </div>
+        <Badge variant={entries.some((entry) => entry.status === "running") ? "outline" : "secondary"}>{entries.length}</Badge>
+      </div>
+
+      {visibleEntries.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Long-running Git operations will appear here.</p>
+      ) : (
+        <div className="flex max-h-80 flex-col gap-3 overflow-auto">
+          {visibleEntries.map((entry) => (
+            <div className="border-b pb-3 last:border-b-0 last:pb-0" key={entry.id}>
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate font-medium">{entry.operation}</p>
+                <Badge className="shrink-0" variant={operationQueueStatusBadgeVariant(entry.status)}>
+                  {operationQueueStatusLabel(entry.status)}
+                </Badge>
+              </div>
+              <code className="mt-2 block truncate rounded bg-muted px-2 py-1 text-xs">{entry.command}</code>
+              <OperationQueueLogLines lines={entry.logs.slice(-5)} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OperationQueueLogLines({ lines }: { lines: OperationQueueEntry["logs"] }) {
+  if (lines.length === 0) {
+    return <p className="mt-2 text-xs text-muted-foreground">Waiting for output.</p>;
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-1">
+      {lines.map((line, index) => (
+        <div className="grid grid-cols-[52px_minmax(0,1fr)] gap-2 text-xs" key={`${line.stream}:${index}:${line.line}`}>
+          <Badge className="h-5 justify-center px-1" variant={line.stream === "stderr" ? "destructive" : "outline"}>
+            {operationLogStreamLabel(line.stream)}
+          </Badge>
+          <pre className="min-w-0 overflow-hidden text-ellipsis whitespace-pre-wrap break-words rounded bg-muted/50 px-2 py-1 leading-5">
+            {line.line}
+          </pre>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function operationQueueStatusBadgeVariant(status: OperationQueueStatus): "secondary" | "destructive" | "outline" {
+  if (status === "success") {
+    return "secondary";
+  }
+
+  if (status === "error") {
+    return "destructive";
+  }
+
+  return "outline";
+}
+
+function operationQueueStatusLabel(status: OperationQueueStatus): string {
+  if (status === "success") {
+    return "OK";
+  }
+
+  if (status === "error") {
+    return "Error";
+  }
+
+  return "Running";
+}
+
+function operationLogStreamLabel(stream: OperationLogStream): string {
+  return stream;
 }
 
 function OperationPreviewPanel({

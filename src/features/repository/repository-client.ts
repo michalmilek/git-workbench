@@ -23,6 +23,10 @@ type RepositoryPathArgs = {
   repositoryPath: string;
 };
 
+type OperationIdArgs = {
+  operationId: string;
+};
+
 type FileDiffArgs = RepositoryPathArgs & {
   filePath: string;
   staged: boolean;
@@ -66,6 +70,10 @@ type PreviewRebaseArgs = RepositoryPathArgs & {
   targetBranch: string;
 };
 
+type QueuedRepositoryPathArgs = RepositoryPathArgs & OperationIdArgs;
+type QueuedMergeArgs = PreviewMergeArgs & OperationIdArgs;
+type QueuedRebaseArgs = PreviewRebaseArgs & OperationIdArgs;
+
 type InvokeCommand = <T>(command: string, args: Record<string, unknown>) => Promise<T>;
 
 export type RepositoryClient = {
@@ -81,9 +89,9 @@ export type RepositoryClient = {
   stageFile(args: FileOperationArgs): Promise<GitOperationResult>;
   unstageFile(args: FileOperationArgs): Promise<GitOperationResult>;
   commitChanges(args: CommitArgs): Promise<GitOperationResult>;
-  fetchRepository(args: RepositoryPathArgs): Promise<GitOperationResult>;
-  pullRepository(args: RepositoryPathArgs): Promise<GitOperationResult>;
-  pushRepository(args: RepositoryPathArgs): Promise<GitOperationResult>;
+  fetchRepository(args: QueuedRepositoryPathArgs): Promise<GitOperationResult>;
+  pullRepository(args: QueuedRepositoryPathArgs): Promise<GitOperationResult>;
+  pushRepository(args: QueuedRepositoryPathArgs): Promise<GitOperationResult>;
   listBranches(repositoryPath: string): Promise<BranchList>;
   checkoutBranch(args: BranchNameArgs): Promise<GitOperationResult>;
   createBranch(args: BranchNameArgs): Promise<GitOperationResult>;
@@ -97,11 +105,11 @@ export type RepositoryClient = {
   getCommitDetails(args: CommitDetailsArgs): Promise<CommitDetails>;
   previewMerge(args: PreviewMergeArgs): Promise<OperationPreview>;
   previewRebase(args: PreviewRebaseArgs): Promise<OperationPreview>;
-  runMerge(args: PreviewMergeArgs): Promise<GitOperationResult>;
-  runRebase(args: PreviewRebaseArgs): Promise<GitOperationResult>;
-  abortMerge(args: RepositoryPathArgs): Promise<GitOperationResult>;
-  abortRebase(args: RepositoryPathArgs): Promise<GitOperationResult>;
-  continueRebase(args: RepositoryPathArgs): Promise<GitOperationResult>;
+  runMerge(args: QueuedMergeArgs): Promise<GitOperationResult>;
+  runRebase(args: QueuedRebaseArgs): Promise<GitOperationResult>;
+  abortMerge(args: QueuedRepositoryPathArgs): Promise<GitOperationResult>;
+  abortRebase(args: QueuedRepositoryPathArgs): Promise<GitOperationResult>;
+  continueRebase(args: QueuedRepositoryPathArgs): Promise<GitOperationResult>;
 };
 
 export function createRepositoryClient(invokeCommand: InvokeCommand): RepositoryClient {
@@ -462,15 +470,15 @@ export function commitChanges(args: CommitArgs): Promise<GitOperationResult> {
   return repositoryClient.commitChanges(args);
 }
 
-export function fetchRepository(args: RepositoryPathArgs): Promise<GitOperationResult> {
+export function fetchRepository(args: QueuedRepositoryPathArgs): Promise<GitOperationResult> {
   return repositoryClient.fetchRepository(args);
 }
 
-export function pullRepository(args: RepositoryPathArgs): Promise<GitOperationResult> {
+export function pullRepository(args: QueuedRepositoryPathArgs): Promise<GitOperationResult> {
   return repositoryClient.pullRepository(args);
 }
 
-export function pushRepository(args: RepositoryPathArgs): Promise<GitOperationResult> {
+export function pushRepository(args: QueuedRepositoryPathArgs): Promise<GitOperationResult> {
   return repositoryClient.pushRepository(args);
 }
 
@@ -510,23 +518,23 @@ export function previewRebase(args: PreviewRebaseArgs): Promise<OperationPreview
   return repositoryClient.previewRebase(args);
 }
 
-export function runMerge(args: PreviewMergeArgs): Promise<GitOperationResult> {
+export function runMerge(args: QueuedMergeArgs): Promise<GitOperationResult> {
   return repositoryClient.runMerge(args);
 }
 
-export function runRebase(args: PreviewRebaseArgs): Promise<GitOperationResult> {
+export function runRebase(args: QueuedRebaseArgs): Promise<GitOperationResult> {
   return repositoryClient.runRebase(args);
 }
 
-export function abortMerge(args: RepositoryPathArgs): Promise<GitOperationResult> {
+export function abortMerge(args: QueuedRepositoryPathArgs): Promise<GitOperationResult> {
   return repositoryClient.abortMerge(args);
 }
 
-export function abortRebase(args: RepositoryPathArgs): Promise<GitOperationResult> {
+export function abortRebase(args: QueuedRepositoryPathArgs): Promise<GitOperationResult> {
   return repositoryClient.abortRebase(args);
 }
 
-export function continueRebase(args: RepositoryPathArgs): Promise<GitOperationResult> {
+export function continueRebase(args: QueuedRepositoryPathArgs): Promise<GitOperationResult> {
   return repositoryClient.continueRebase(args);
 }
 

@@ -5,6 +5,7 @@ use serde::Serialize;
 use crate::{
     git::{
         command::{GitOperationResult, run_git},
+        operation_stream::run_git_with_events,
         status::{GitFileStatus, read_repository_status},
     },
     operation_error::OperationError,
@@ -64,6 +65,7 @@ pub fn read_conflict_state(repository_path: &Path) -> Result<ConflictState, Oper
 /// # Errors
 ///
 /// Returns an operation error when Git cannot be executed or the merge fails.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn run_merge(
     repository_path: &Path,
     source_branch: &str,
@@ -71,11 +73,31 @@ pub fn run_merge(
     run_git(repository_path, &merge_args(source_branch))
 }
 
+/// Runs `git merge` with the selected source branch and emits operation events.
+///
+/// # Errors
+///
+/// Returns an operation error when Git cannot be executed or the merge fails.
+pub fn run_merge_with_events(
+    app: tauri::AppHandle,
+    repository_path: &Path,
+    source_branch: &str,
+    operation_id: &str,
+) -> Result<GitOperationResult, OperationError> {
+    run_git_with_events(
+        app,
+        repository_path,
+        &merge_args(source_branch),
+        operation_id,
+    )
+}
+
 /// Runs `git rebase` with the selected target branch.
 ///
 /// # Errors
 ///
 /// Returns an operation error when Git cannot be executed or the rebase fails.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn run_rebase(
     repository_path: &Path,
     target_branch: &str,
@@ -83,16 +105,46 @@ pub fn run_rebase(
     run_git(repository_path, &rebase_args(target_branch))
 }
 
+/// Runs `git rebase` with the selected target branch and emits operation events.
+///
+/// # Errors
+///
+/// Returns an operation error when Git cannot be executed or the rebase fails.
+pub fn run_rebase_with_events(
+    app: tauri::AppHandle,
+    repository_path: &Path,
+    target_branch: &str,
+    operation_id: &str,
+) -> Result<GitOperationResult, OperationError> {
+    run_git_with_events(
+        app,
+        repository_path,
+        &rebase_args(target_branch),
+        operation_id,
+    )
+}
+
 /// Aborts the active merge.
 ///
 /// # Errors
 ///
 /// Returns an operation error when Git cannot be executed or the merge abort fails.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn abort_merge(repository_path: &Path) -> Result<GitOperationResult, OperationError> {
-    run_git(
-        repository_path,
-        &[String::from("merge"), String::from("--abort")],
-    )
+    run_git(repository_path, &abort_merge_args())
+}
+
+/// Aborts the active merge and emits operation events.
+///
+/// # Errors
+///
+/// Returns an operation error when Git cannot be executed or the merge abort fails.
+pub fn abort_merge_with_events(
+    app: tauri::AppHandle,
+    repository_path: &Path,
+    operation_id: &str,
+) -> Result<GitOperationResult, OperationError> {
+    run_git_with_events(app, repository_path, &abort_merge_args(), operation_id)
 }
 
 /// Aborts the active rebase.
@@ -100,11 +152,22 @@ pub fn abort_merge(repository_path: &Path) -> Result<GitOperationResult, Operati
 /// # Errors
 ///
 /// Returns an operation error when Git cannot be executed or the rebase abort fails.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn abort_rebase(repository_path: &Path) -> Result<GitOperationResult, OperationError> {
-    run_git(
-        repository_path,
-        &[String::from("rebase"), String::from("--abort")],
-    )
+    run_git(repository_path, &abort_rebase_args())
+}
+
+/// Aborts the active rebase and emits operation events.
+///
+/// # Errors
+///
+/// Returns an operation error when Git cannot be executed or the rebase abort fails.
+pub fn abort_rebase_with_events(
+    app: tauri::AppHandle,
+    repository_path: &Path,
+    operation_id: &str,
+) -> Result<GitOperationResult, OperationError> {
+    run_git_with_events(app, repository_path, &abort_rebase_args(), operation_id)
 }
 
 /// Continues the active rebase with a no-op editor.
@@ -112,16 +175,22 @@ pub fn abort_rebase(repository_path: &Path) -> Result<GitOperationResult, Operat
 /// # Errors
 ///
 /// Returns an operation error when Git cannot be executed or the rebase continue fails.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn continue_rebase(repository_path: &Path) -> Result<GitOperationResult, OperationError> {
-    run_git(
-        repository_path,
-        &[
-            String::from("-c"),
-            String::from("core.editor=true"),
-            String::from("rebase"),
-            String::from("--continue"),
-        ],
-    )
+    run_git(repository_path, &continue_rebase_args())
+}
+
+/// Continues the active rebase with a no-op editor and emits operation events.
+///
+/// # Errors
+///
+/// Returns an operation error when Git cannot be executed or the rebase continue fails.
+pub fn continue_rebase_with_events(
+    app: tauri::AppHandle,
+    repository_path: &Path,
+    operation_id: &str,
+) -> Result<GitOperationResult, OperationError> {
+    run_git_with_events(app, repository_path, &continue_rebase_args(), operation_id)
 }
 
 fn detect_conflict_operation(repository_path: &Path) -> Result<ConflictOperation, OperationError> {
@@ -176,6 +245,23 @@ fn rebase_args(target_branch: &str) -> Vec<String> {
     vec![String::from("rebase"), target_branch.to_owned()]
 }
 
+fn abort_merge_args() -> Vec<String> {
+    vec![String::from("merge"), String::from("--abort")]
+}
+
+fn abort_rebase_args() -> Vec<String> {
+    vec![String::from("rebase"), String::from("--abort")]
+}
+
+fn continue_rebase_args() -> Vec<String> {
+    vec![
+        String::from("-c"),
+        String::from("core.editor=true"),
+        String::from("rebase"),
+        String::from("--continue"),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use std::{error::Error, fs, path::Path, process::Command};
@@ -183,10 +269,11 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        ConflictFile, ConflictOperation, ConflictState, abort_merge, abort_rebase, continue_rebase,
-        merge_args, read_conflict_state, rebase_args, run_merge, run_rebase,
+        ConflictFile, ConflictOperation, ConflictState, abort_merge, abort_merge_args,
+        abort_rebase, abort_rebase_args, continue_rebase, continue_rebase_args, merge_args,
+        read_conflict_state, rebase_args, run_merge, run_rebase,
     };
-    use crate::git::status::GitFileStatus;
+    use crate::git::{operation_stream::command_text, status::GitFileStatus};
 
     #[test]
     fn serializes_conflict_state_dtos_as_camel_case() -> Result<(), Box<dyn Error>> {
@@ -231,6 +318,24 @@ mod tests {
             ["merge", "feature/conflict"]
         );
         assert_eq!(rebase_args("origin/main"), ["rebase", "origin/main"]);
+    }
+
+    #[test]
+    fn builds_streamed_conflict_operation_command_text() {
+        assert_eq!(
+            command_text(&merge_args("feature/conflict")),
+            "git merge feature/conflict"
+        );
+        assert_eq!(
+            command_text(&rebase_args("origin/main")),
+            "git rebase origin/main"
+        );
+        assert_eq!(command_text(&abort_merge_args()), "git merge --abort");
+        assert_eq!(command_text(&abort_rebase_args()), "git rebase --abort");
+        assert_eq!(
+            command_text(&continue_rebase_args()),
+            "git -c core.editor=true rebase --continue"
+        );
     }
 
     #[test]
