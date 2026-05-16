@@ -41,6 +41,7 @@ Implemented on `main`:
 - Provider PR/MR work item list for the active repository.
 - Provider CI/check/pipeline status for listed PRs and MRs.
 - External PR/MR and CI/pipeline links through the system opener.
+- Smart commit grouping suggestions with conventional summaries, commit bodies, counts, and group staging.
 - Latest operation result/error panel with command, stdout, and stderr.
 - Persistent command log in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
@@ -140,6 +141,7 @@ docs/
 
 ## Next Milestone
 
-The next milestone is commit grouping:
+The next milestone is multi-repository workspace support:
 
-- Add smart commit grouping for related changes.
+- Open and monitor multiple repositories in one workbench.
+- Add batch operations for repeated fetch, pull, and push workflows.
