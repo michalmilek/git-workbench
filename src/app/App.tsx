@@ -42,6 +42,16 @@ import {
 import { buildPartialStageGroupError, buildStageGroupResult } from "@/features/repository/commit-group-stage";
 import { isCommitSummaryValid } from "@/features/repository/commit-validation";
 import {
+  COMPANY_PROFILES_STORAGE_KEY,
+  matchCompanyProfile,
+  normalizeCompanyProfileInput,
+  parseCompanyProfiles,
+  removeCompanyProfile,
+  serializeCompanyProfiles,
+  upsertCompanyProfile,
+  type CompanyProfile
+} from "@/features/repository/company-profiles";
+import {
   buildCommitGraphRows,
   classifyCommitRef,
   filterCommitHistory,
@@ -252,6 +262,12 @@ export function App() {
   const [providerAccountAction, setProviderAccountAction] = useState<ProviderAccountAction>(null);
   const [activeProviderAccountId, setActiveProviderAccountId] = useState<string | null>(null);
   const [providerConnectionResults, setProviderConnectionResults] = useState<Record<string, ProviderConnectionResult>>({});
+  const [companyProfiles, setCompanyProfiles] = useState(readCompanyProfiles);
+  const [companyProfileName, setCompanyProfileName] = useState("");
+  const [companyProfileGitlabBaseUrl, setCompanyProfileGitlabBaseUrl] = useState("");
+  const [companyProfileVpnLabel, setCompanyProfileVpnLabel] = useState("");
+  const [companyProfileSshHost, setCompanyProfileSshHost] = useState("");
+  const [companyProfileNotes, setCompanyProfileNotes] = useState("");
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [diffMode, setDiffMode] = useState<DiffMode>("worktree");
   const [diff, setDiff] = useState<FileDiff | null>(null);
@@ -334,6 +350,15 @@ export function App() {
   const workspaceFetchTargets = workspaceBatchTargets("fetch", workspaceRepositories, workspaceBatchSelectedPaths);
   const workspacePullTargets = workspaceBatchTargets("pull", workspaceRepositories, workspaceBatchSelectedPaths);
   const workspacePushTargets = workspaceBatchTargets("push", workspaceRepositories, workspaceBatchSelectedPaths);
+  const matchedCompanyProfile = useMemo(
+    () => matchCompanyProfile(companyProfiles, providerRemoteUrls(providerRemotes)),
+    [companyProfiles, providerRemotes]
+  );
+  const canSaveCompanyProfile =
+    companyProfileName.trim().length > 0 &&
+    [companyProfileGitlabBaseUrl, companyProfileVpnLabel, companyProfileSshHost, companyProfileNotes].some(
+      (value) => value.trim().length > 0
+    );
 
   useEffect(() => {
     setWorkspaceBatchSelectedPaths((selectedPaths) => reconcileWorkspaceBatchSelection(workspaceRepositories, selectedPaths));
@@ -1411,6 +1436,42 @@ export function App() {
     setWorkspaceBatchSelectedPaths((selectedPaths) => toggleWorkspaceBatchPath(selectedPaths, path));
   }
 
+  function saveCurrentCompanyProfile() {
+    const profile = normalizeCompanyProfileInput(
+      {
+        gitlabBaseUrl: companyProfileGitlabBaseUrl,
+        name: companyProfileName,
+        notes: companyProfileNotes,
+        sshHost: companyProfileSshHost,
+        vpnLabel: companyProfileVpnLabel
+      },
+      new Date()
+    );
+
+    if (profile === null) {
+      return;
+    }
+
+    updateCompanyProfiles((profiles) => upsertCompanyProfile(profiles, profile));
+    setCompanyProfileName("");
+    setCompanyProfileGitlabBaseUrl("");
+    setCompanyProfileVpnLabel("");
+    setCompanyProfileSshHost("");
+    setCompanyProfileNotes("");
+  }
+
+  function deleteCompanyProfile(id: string) {
+    updateCompanyProfiles((profiles) => removeCompanyProfile(profiles, id));
+  }
+
+  function updateCompanyProfiles(updateProfiles: (profiles: CompanyProfile[]) => CompanyProfile[]) {
+    setCompanyProfiles((profiles) => {
+      const nextProfiles = updateProfiles(profiles);
+      localStorage.setItem(COMPANY_PROFILES_STORAGE_KEY, serializeCompanyProfiles(nextProfiles));
+      return nextProfiles;
+    });
+  }
+
   function updateWorkspaceRepositories(updateRepositories: (repositories: WorkspaceRepository[]) => WorkspaceRepository[]) {
     setWorkspaceRepositories((repositories) => {
       const nextRepositories = updateRepositories(repositories);
@@ -2320,6 +2381,24 @@ export function App() {
             repositoryOpened={repositoryPath !== null}
           />
 
+          <CompanyProfilesPanel
+            canSave={canSaveCompanyProfile}
+            gitlabBaseUrl={companyProfileGitlabBaseUrl}
+            matchedProfile={matchedCompanyProfile}
+            name={companyProfileName}
+            notes={companyProfileNotes}
+            onDelete={deleteCompanyProfile}
+            onGitlabBaseUrlChange={setCompanyProfileGitlabBaseUrl}
+            onNameChange={setCompanyProfileName}
+            onNotesChange={setCompanyProfileNotes}
+            onSave={saveCurrentCompanyProfile}
+            onSshHostChange={setCompanyProfileSshHost}
+            onVpnLabelChange={setCompanyProfileVpnLabel}
+            profiles={companyProfiles}
+            sshHost={companyProfileSshHost}
+            vpnLabel={companyProfileVpnLabel}
+          />
+
           <ProviderAccountsPanel
             accounts={providerAccounts}
             action={providerAccountAction}
@@ -2482,6 +2561,10 @@ function readInitialRepositoryPath(): string {
 
 function readCommandLogEntries(): CommandLogEntry[] {
   return parseCommandLog(localStorage.getItem(COMMAND_LOG_STORAGE_KEY));
+}
+
+function readCompanyProfiles(): CompanyProfile[] {
+  return parseCompanyProfiles(localStorage.getItem(COMPANY_PROFILES_STORAGE_KEY));
 }
 
 function getSelectedFile(status: RepositoryStatus | null, selectedFilePath: string | null): StatusFile | null {
@@ -3654,6 +3737,175 @@ function ProviderDetailRow({
   );
 }
 
+function CompanyProfilesPanel({
+  canSave,
+  gitlabBaseUrl,
+  matchedProfile,
+  name,
+  notes,
+  onDelete,
+  onGitlabBaseUrlChange,
+  onNameChange,
+  onNotesChange,
+  onSave,
+  onSshHostChange,
+  onVpnLabelChange,
+  profiles,
+  sshHost,
+  vpnLabel
+}: {
+  canSave: boolean;
+  gitlabBaseUrl: string;
+  matchedProfile: CompanyProfile | null;
+  name: string;
+  notes: string;
+  onDelete(id: string): void;
+  onGitlabBaseUrlChange(value: string): void;
+  onNameChange(value: string): void;
+  onNotesChange(value: string): void;
+  onSave(): void;
+  onSshHostChange(value: string): void;
+  onVpnLabelChange(value: string): void;
+  profiles: CompanyProfile[];
+  sshHost: string;
+  vpnLabel: string;
+}) {
+  return (
+    <section className="mt-4 flex flex-col gap-3 rounded-md border bg-background p-3 text-sm" data-testid="company-profiles-panel">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 font-medium">
+          <IconServer aria-hidden="true" className="size-4 shrink-0" />
+          Company profiles
+        </div>
+        <Badge variant={matchedProfile === null ? "outline" : "secondary"}>
+          {matchedProfile === null ? profiles.length : `Matched: ${matchedProfile.name}`}
+        </Badge>
+      </div>
+
+      {matchedProfile === null ? (
+        <p className="text-xs text-muted-foreground">No profile matched for the active remotes.</p>
+      ) : (
+        <div className="rounded-md border bg-muted/20 p-2 text-xs">
+          <p className="font-medium">Matched: {matchedProfile.name}</p>
+          <p className="mt-1 text-muted-foreground">GitLab: {formatProfileValue(matchedProfile.gitlabBaseUrl)}</p>
+          <p className="text-muted-foreground">VPN: {formatProfileValue(matchedProfile.vpnLabel)}</p>
+          <p className="text-muted-foreground">SSH: {formatProfileValue(matchedProfile.sshHost)}</p>
+          {matchedProfile.notes.length === 0 ? null : <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{matchedProfile.notes}</p>}
+        </div>
+      )}
+
+      <form
+        className="flex flex-col gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave();
+        }}
+      >
+        <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground" htmlFor="company-profile-name">
+          Name
+          <input
+            className="h-8 rounded-md border border-input bg-background px-2 text-sm font-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+            id="company-profile-name"
+            onChange={(event) => {
+              onNameChange(event.target.value);
+            }}
+            placeholder="Platform"
+            value={name}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground" htmlFor="company-profile-gitlab-url">
+          GitLab URL
+          <input
+            className="h-8 rounded-md border border-input bg-background px-2 text-sm font-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+            id="company-profile-gitlab-url"
+            onChange={(event) => {
+              onGitlabBaseUrlChange(event.target.value);
+            }}
+            placeholder="https://gitlab.company.test/group"
+            value={gitlabBaseUrl}
+          />
+        </label>
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-muted-foreground" htmlFor="company-profile-vpn">
+            VPN
+            <input
+              className="h-8 min-w-0 rounded-md border border-input bg-background px-2 text-sm font-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+              id="company-profile-vpn"
+              onChange={(event) => {
+                onVpnLabelChange(event.target.value);
+              }}
+              placeholder="Corp VPN"
+              value={vpnLabel}
+            />
+          </label>
+
+          <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-muted-foreground" htmlFor="company-profile-ssh">
+            SSH host
+            <input
+              className="h-8 min-w-0 rounded-md border border-input bg-background px-2 text-sm font-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+              id="company-profile-ssh"
+              onChange={(event) => {
+                onSshHostChange(event.target.value);
+              }}
+              placeholder="gitlab.company.test"
+              value={sshHost}
+            />
+          </label>
+        </div>
+
+        <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground" htmlFor="company-profile-notes">
+          Notes
+          <Textarea
+            className="min-h-20 font-normal"
+            id="company-profile-notes"
+            onChange={(event) => {
+              onNotesChange(event.target.value);
+            }}
+            placeholder="Setup notes"
+            value={notes}
+          />
+        </label>
+
+        <Button disabled={!canSave} size="sm" type="submit" variant="secondary">
+          <IconPlus aria-hidden="true" data-icon="inline-start" />
+          Save profile
+        </Button>
+      </form>
+
+      <div className="flex max-h-44 flex-col gap-2 overflow-auto">
+        {profiles.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No company profiles.</p>
+        ) : (
+          profiles.map((profile) => (
+            <div className="rounded-md border p-2" key={profile.id}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{profile.name}</p>
+                  <p className="truncate text-xs text-muted-foreground">{formatProfileValue(profile.gitlabBaseUrl)}</p>
+                </div>
+                <Button
+                  aria-label={`Delete company profile ${profile.name}`}
+                  className="size-7 shrink-0"
+                  onClick={() => {
+                    onDelete(profile.id);
+                  }}
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <IconTrash aria-hidden="true" className="size-4" />
+                </Button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
 function ProviderAccountsPanel({
   accounts,
   action,
@@ -3961,6 +4213,28 @@ function ProviderConnectionSummary({ result }: { result: ProviderConnectionResul
       {formatProviderStatusCode(result.statusCode)} - {result.message}
     </p>
   );
+}
+
+function providerRemoteUrls(remotes: ProviderRemote[]): string[] {
+  const urls: string[] = [];
+
+  for (const remote of remotes) {
+    if (remote.fetchUrl !== null) {
+      urls.push(remote.fetchUrl);
+    }
+    if (remote.pushUrl !== null) {
+      urls.push(remote.pushUrl);
+    }
+    if (remote.webUrl !== null) {
+      urls.push(remote.webUrl);
+    }
+  }
+
+  return urls;
+}
+
+function formatProfileValue(value: string): string {
+  return value.length === 0 ? "not set" : value;
 }
 
 function ProviderRemoteCard({ remote }: { remote: ProviderRemote }) {
