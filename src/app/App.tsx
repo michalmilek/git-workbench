@@ -87,6 +87,7 @@ import {
   abortRebase,
   applyStash,
   checkoutBranch,
+  cloneRepository,
   commitChanges,
   continueRebase,
   createBranch,
@@ -125,6 +126,7 @@ import {
   unstageHunk,
   unstageFile
 } from "@/features/repository/repository-client";
+import { buildCloneRepositoryInput, selectRepositoryDirectory } from "@/features/repository/repository-picker";
 import {
   RECENT_REPOSITORIES_STORAGE_KEY,
   parseRecentRepositories,
@@ -220,6 +222,8 @@ type BusyAction =
   | "stage"
   | "unstage"
   | "commit"
+  | "clone"
+  | "repository-picker"
   | SyncAction
   | WorkspaceBatchBusyAction
   | SyncPreviewAction
@@ -259,6 +263,8 @@ export function App() {
   const [workspaceRepositories, setWorkspaceRepositories] = useState<WorkspaceRepository[]>(readWorkspaceRepositories);
   const [workspaceBatchSelectedPaths, setWorkspaceBatchSelectedPaths] = useState<string[]>([]);
   const [repositoryPathInput, setRepositoryPathInput] = useState(readInitialRepositoryPath);
+  const [cloneRepositoryUrl, setCloneRepositoryUrl] = useState("");
+  const [cloneDestinationPath, setCloneDestinationPath] = useState("");
   const [repositoryPath, setRepositoryPath] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ViewMode>("changes");
   const [status, setStatus] = useState<RepositoryStatus | null>(null);
@@ -501,6 +507,71 @@ export function App() {
     }
 
     await loadRepositoryStatus(path, selectedFilePath);
+  }
+
+  async function browseRepositoryFolder() {
+    setBusyAction("repository-picker");
+
+    try {
+      const selectedPath = await selectRepositoryDirectory();
+      if (selectedPath === null) {
+        return;
+      }
+
+      setRepositoryPathInput(selectedPath);
+      await loadRepositoryStatus(selectedPath, null);
+    } catch (error) {
+      const operationError = describeOperationError(error);
+      setFeedback({ kind: "error", error: operationError });
+      recordOperationError("Browse repository folder", operationError);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function browseCloneDestinationFolder() {
+    setBusyAction("repository-picker");
+
+    try {
+      const selectedPath = await selectRepositoryDirectory("Choose clone destination folder");
+      if (selectedPath !== null) {
+        setCloneDestinationPath(selectedPath);
+      }
+    } catch (error) {
+      const operationError = describeOperationError(error);
+      setFeedback({ kind: "error", error: operationError });
+      recordOperationError("Browse clone destination", operationError);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function cloneAndOpenRepository() {
+    const cloneInput = buildCloneRepositoryInput({
+      destinationPath: cloneDestinationPath,
+      remoteUrl: cloneRepositoryUrl
+    });
+
+    if ("message" in cloneInput) {
+      setFeedback({ kind: "error", error: { message: cloneInput.message } });
+      return;
+    }
+
+    setBusyAction("clone");
+
+    try {
+      const result = await cloneRepository(cloneInput);
+      setFeedback({ kind: "result", result });
+      recordOperationResult("Clone repository", result);
+      setRepositoryPathInput(cloneInput.destinationPath);
+      await loadRepositoryStatus(cloneInput.destinationPath, null);
+    } catch (error) {
+      const operationError = describeOperationError(error);
+      setFeedback({ kind: "error", error: operationError });
+      recordOperationError("Clone repository", operationError);
+    } finally {
+      setBusyAction(null);
+    }
   }
 
   async function refreshRepository() {
@@ -2085,11 +2156,22 @@ export function App() {
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              <Button disabled={busyAction !== null || repositoryPathInput.trim().length === 0} type="submit">
+              <Button
+                disabled={busyAction !== null}
+                onClick={() => {
+                  void browseRepositoryFolder();
+                }}
+                type="button"
+              >
                 <IconFolderOpen aria-hidden="true" data-icon="inline-start" />
-                Open
+                Browse
+              </Button>
+              <Button disabled={busyAction !== null || repositoryPathInput.trim().length === 0} type="submit" variant="outline">
+                <IconFolderOpen aria-hidden="true" data-icon="inline-start" />
+                Open path
               </Button>
               <Button
+                className="col-span-2"
                 disabled={busyAction !== null || (repositoryPath === null && repositoryPathInput.trim().length === 0)}
                 onClick={() => {
                   void refreshRepository();
@@ -2099,6 +2181,64 @@ export function App() {
               >
                 <IconRefresh aria-hidden="true" data-icon="inline-start" />
                 Refresh
+              </Button>
+            </div>
+          </form>
+
+          <form
+            className="mt-5 flex flex-col gap-3 rounded-md border bg-background p-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void cloneAndOpenRepository();
+            }}
+          >
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <IconDownload aria-hidden="true" className="size-4 shrink-0" />
+              Clone from URL
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm text-muted-foreground" htmlFor="clone-repository-url">
+                Repository URL
+              </label>
+              <input
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                id="clone-repository-url"
+                onChange={(event) => {
+                  setCloneRepositoryUrl(event.target.value);
+                }}
+                placeholder="https://github.com/org/repo.git"
+                value={cloneRepositoryUrl}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm text-muted-foreground" htmlFor="clone-destination-path">
+                Destination folder
+              </label>
+              <input
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                id="clone-destination-path"
+                onChange={(event) => {
+                  setCloneDestinationPath(event.target.value);
+                }}
+                placeholder="/Users/name/project"
+                value={cloneDestinationPath}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                disabled={busyAction !== null}
+                onClick={() => {
+                  void browseCloneDestinationFolder();
+                }}
+                type="button"
+                variant="outline"
+              >
+                <IconFolderOpen aria-hidden="true" data-icon="inline-start" />
+                Folder
+              </Button>
+              <Button disabled={busyAction !== null} type="submit">
+                <IconDownload aria-hidden="true" data-icon="inline-start" />
+                Clone and open
               </Button>
             </div>
           </form>

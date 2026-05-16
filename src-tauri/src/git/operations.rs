@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use crate::{
     git::{
-        command::{GitOperationResult, run_git, run_git_with_stdin},
+        command::{GitOperationResult, run_git, run_git_with_stdin, run_git_without_repository},
         operation_stream::run_git_with_events,
     },
     operation_error::OperationError,
@@ -41,6 +41,19 @@ pub fn get_file_diff(
         text: result.stdout,
         is_binary,
     })
+}
+
+/// Clones a remote repository into a destination path.
+///
+/// # Errors
+///
+/// Returns an operation error when Git cannot be executed or exits unsuccessfully.
+pub fn clone_repository(
+    remote_url: &str,
+    destination_path: &Path,
+) -> Result<GitOperationResult, OperationError> {
+    let args = clone_repository_args(remote_url, destination_path);
+    run_git_without_repository(&args)
 }
 
 /// Stages a single file path.
@@ -196,6 +209,15 @@ fn diff_args(file_path: &str, staged: bool) -> Vec<String> {
     args
 }
 
+fn clone_repository_args(remote_url: &str, destination_path: &Path) -> Vec<String> {
+    vec![
+        String::from("clone"),
+        String::from("--"),
+        remote_url.to_owned(),
+        destination_path.to_string_lossy().into_owned(),
+    ]
+}
+
 fn stage_args(file_path: &str) -> Vec<String> {
     vec![
         String::from("add"),
@@ -319,9 +341,10 @@ mod tests {
     use std::{error::Error, fs, path::Path, process::Command};
 
     use super::{
-        commit_args, commit_changes, diff_args, fetch_repository_args, get_file_diff,
-        is_binary_diff, pull_repository_args, push_repository_args, render_untracked_text_diff,
-        stage_file, stage_hunk, stage_hunk_args, unstage_file, unstage_hunk, unstage_hunk_args,
+        clone_repository, clone_repository_args, commit_args, commit_changes, diff_args,
+        fetch_repository_args, get_file_diff, is_binary_diff, pull_repository_args,
+        push_repository_args, render_untracked_text_diff, stage_file, stage_hunk, stage_hunk_args,
+        unstage_file, unstage_hunk, unstage_hunk_args,
     };
     use crate::git::{
         operation_stream::command_text,
@@ -376,6 +399,22 @@ mod tests {
         assert_eq!(command_text(&fetch_repository_args()), "git fetch");
         assert_eq!(command_text(&pull_repository_args()), "git pull");
         assert_eq!(command_text(&push_repository_args()), "git push");
+    }
+
+    #[test]
+    fn builds_clone_repository_args() {
+        assert_eq!(
+            clone_repository_args(
+                "https://github.com/openai/codex.git",
+                Path::new("/work/codex")
+            ),
+            [
+                "clone",
+                "--",
+                "https://github.com/openai/codex.git",
+                "/work/codex"
+            ]
+        );
     }
 
     #[test]
@@ -452,6 +491,40 @@ new file mode 100644
         assert!(read_repository_status(&repository_path)?.files.is_empty());
 
         fs::remove_dir_all(repository_path)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn clones_real_repository_to_destination_path() -> Result<(), Box<dyn Error>> {
+        let source_path = create_test_repository("clone-source")?;
+        fs::write(source_path.join("README.md"), "hello\n")?;
+        run_git_command(&source_path, ["add", "README.md"])?;
+        run_git_command(&source_path, ["commit", "-m", "seed clone source"])?;
+        let destination_path =
+            std::env::temp_dir().join(format!("git-workbench-clone-target-{}", std::process::id()));
+        if destination_path.exists() {
+            fs::remove_dir_all(&destination_path)?;
+        }
+
+        let result = clone_repository(source_path.to_string_lossy().as_ref(), &destination_path)?;
+
+        assert_eq!(
+            result.command,
+            format!(
+                "git clone -- {} {}",
+                source_path.display(),
+                destination_path.display()
+            )
+        );
+        assert!(destination_path.join(".git").is_dir());
+        assert_eq!(
+            fs::read_to_string(destination_path.join("README.md"))?,
+            "hello\n"
+        );
+
+        fs::remove_dir_all(source_path)?;
+        fs::remove_dir_all(destination_path)?;
 
         Ok(())
     }

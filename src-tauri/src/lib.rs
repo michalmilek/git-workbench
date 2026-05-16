@@ -35,6 +35,14 @@ fn get_repository_status(repository_path: &str) -> Result<RepositoryStatus, Oper
 }
 
 #[tauri::command]
+fn clone_repository(
+    remote_url: &str,
+    destination_path: &str,
+) -> Result<GitOperationResult, OperationError> {
+    git::operations::clone_repository(remote_url, std::path::Path::new(destination_path))
+}
+
+#[tauri::command]
 fn get_file_diff(
     repository_path: &str,
     file_path: &str,
@@ -306,9 +314,11 @@ fn drop_stash(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() -> tauri::Result<()> {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             get_repository_status,
+            clone_repository,
             get_file_diff,
             stage_file,
             unstage_file,

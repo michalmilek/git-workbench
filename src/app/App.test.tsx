@@ -27,6 +27,7 @@ import type {
 } from "@/features/repository/repository-types";
 
 const repositoryMocks = vi.hoisted(() => ({
+  cloneRepository: vi.fn<() => Promise<GitOperationResult>>(),
   getCommitDetails: vi.fn<() => Promise<CommitDetails>>(),
   getConflictState: vi.fn<() => Promise<ConflictState>>(),
   getFileDiff: vi.fn<(args: { filePath: string; repositoryPath: string; staged: boolean }) => Promise<FileDiff>>(),
@@ -52,6 +53,10 @@ const repositoryMocks = vi.hoisted(() => ({
   unstageFile: vi.fn<(args: { filePath: string; repositoryPath: string }) => Promise<GitOperationResult>>()
 }));
 
+const repositoryPickerMocks = vi.hoisted(() => ({
+  selectRepositoryDirectory: vi.fn<() => Promise<string | null>>()
+}));
+
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(() => Promise.resolve(() => {}))
 }));
@@ -59,6 +64,15 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn()
 }));
+
+vi.mock("@/features/repository/repository-picker", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/features/repository/repository-picker")>();
+
+  return {
+    ...actual,
+    selectRepositoryDirectory: repositoryPickerMocks.selectRepositoryDirectory
+  };
+});
 
 vi.mock("@/features/repository/repository-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/features/repository/repository-client")>();
@@ -106,6 +120,37 @@ describe("App repository health", () => {
     await clickButton(container, "Refresh");
     expect(repositoryHealthText(container)).toContain("Last refreshJust now");
     expect(repositoryHealthText(container)).not.toContain("Last refreshNever refreshed");
+  });
+
+  test("opens a repository selected with the native folder picker", async () => {
+    repositoryPickerMocks.selectRepositoryDirectory.mockResolvedValue("/Users/name/project");
+
+    await clickButton(container, "Browse");
+
+    expect(repositoryPickerMocks.selectRepositoryDirectory).toHaveBeenCalledTimes(1);
+    expect(repositoryMocks.getRepositoryStatus).toHaveBeenCalledWith("/Users/name/project");
+    expect(requiredElement<HTMLInputElement>(container.querySelector("#repository-path")).value).toBe("/Users/name/project");
+    expect(container.textContent).toContain("main");
+  });
+
+  test("clones a repository URL and opens the cloned destination", async () => {
+    repositoryMocks.cloneRepository.mockResolvedValue({
+      command: "git clone -- https://github.com/openai/codex.git /work/codex",
+      stderr: "",
+      stdout: "Cloned repository."
+    });
+
+    await setFieldValue(container, "#clone-repository-url", "https://github.com/openai/codex.git");
+    await setFieldValue(container, "#clone-destination-path", "/work/codex");
+    await clickButton(container, "Clone and open");
+
+    expect(repositoryMocks.cloneRepository).toHaveBeenCalledWith({
+      destinationPath: "/work/codex",
+      remoteUrl: "https://github.com/openai/codex.git"
+    });
+    expect(repositoryMocks.getRepositoryStatus).toHaveBeenCalledWith("/work/codex");
+    expect(requiredElement<HTMLInputElement>(container.querySelector("#repository-path")).value).toBe("/work/codex");
+    expect(container.textContent).toContain("Cloned repository.");
   });
 
   test("renders provider-neutral work item details and updates selection", async () => {
@@ -547,6 +592,11 @@ function createMemoryStorage(): Storage {
 }
 
 function resetRepositoryMocks() {
+  repositoryMocks.cloneRepository.mockResolvedValue({
+    command: "git clone -- https://github.com/openai/codex.git /work/codex",
+    stderr: "",
+    stdout: "Cloned repository."
+  });
   repositoryMocks.getRepositoryStatus.mockResolvedValue(repositoryStatus());
   repositoryMocks.getConflictState.mockResolvedValue(noConflictState());
   repositoryMocks.getFileDiff.mockImplementation(async ({ filePath }) => ({ isBinary: false, path: filePath, text: filePath }));
@@ -579,6 +629,7 @@ function resetRepositoryMocks() {
     providerResponseUrl: "https://github.com/openai/codex/pull/42#pullrequestreview-123"
   });
   repositoryMocks.unstageFile.mockResolvedValue({ command: "git restore --staged -- src/App.tsx", stderr: "", stdout: "unstaged" });
+  repositoryPickerMocks.selectRepositoryDirectory.mockResolvedValue(null);
 }
 
 async function openRepository(container: HTMLElement, path: string) {

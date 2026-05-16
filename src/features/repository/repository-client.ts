@@ -31,6 +31,11 @@ type RepositoryPathArgs = {
   repositoryPath: string;
 };
 
+type CloneRepositoryArgs = {
+  remoteUrl: string;
+  destinationPath: string;
+};
+
 type OperationIdArgs = {
   operationId: string;
 };
@@ -94,6 +99,7 @@ type QueuedRebaseArgs = PreviewRebaseArgs & OperationIdArgs;
 type InvokeCommand = <T>(command: string, args: Record<string, unknown>) => Promise<T>;
 
 export type RepositoryClient = {
+  cloneRepository(args: CloneRepositoryArgs): Promise<GitOperationResult>;
   getRepositoryStatus(repositoryPath: string): Promise<RepositoryStatus>;
   getConflictState(repositoryPath: string): Promise<ConflictState>;
   listProviderRemotes(repositoryPath: string): Promise<ProviderRemoteList>;
@@ -139,6 +145,9 @@ export type RepositoryClient = {
 
 export function createRepositoryClient(invokeCommand: InvokeCommand): RepositoryClient {
   return {
+    cloneRepository(args) {
+      return invokeCommand<GitOperationResult>("clone_repository", args);
+    },
     commitChanges(args) {
       return invokeCommand<GitOperationResult>("commit_changes", args);
     },
@@ -267,6 +276,14 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
 
 export function getBrowserRepositoryClient(): RepositoryClient {
   return {
+    cloneRepository(args) {
+      return Promise.resolve(
+        browserMutationResult(
+          `git clone -- ${args.remoteUrl} ${args.destinationPath}`,
+          "Open the app through Tauri to clone repositories."
+        )
+      );
+    },
     abortMerge() {
       return Promise.resolve(browserMutationResult("git merge --abort"));
     },
@@ -527,6 +544,10 @@ export function getBrowserRepositoryClient(): RepositoryClient {
 
 const repositoryClient = hasTauriRuntime() ? createRepositoryClient(invoke) : getBrowserRepositoryClient();
 
+export function cloneRepository(args: CloneRepositoryArgs): Promise<GitOperationResult> {
+  return repositoryClient.cloneRepository(args);
+}
+
 export function getRepositoryStatus(repositoryPath: string): Promise<RepositoryStatus> {
   return repositoryClient.getRepositoryStatus(repositoryPath);
 }
@@ -697,11 +718,11 @@ function hasTauriRuntime(): boolean {
   return "__TAURI_INTERNALS__" in window;
 }
 
-function browserMutationResult(command: string): GitOperationResult {
+function browserMutationResult(command: string, stdout = "Open the app through Tauri to run mutating Git commands."): GitOperationResult {
   return {
     command,
     stderr: "",
-    stdout: "Open the app through Tauri to run mutating Git commands."
+    stdout
   };
 }
 
