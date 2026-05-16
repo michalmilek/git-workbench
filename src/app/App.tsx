@@ -19,9 +19,10 @@ import {
   IconTrash,
   IconUpload
 } from "@tabler/icons-react";
+import type { PatchDiffProps } from "@pierre/diffs/react";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -232,6 +233,25 @@ type BusyAction =
   | StashAction
   | OperationExecutionAction
   | null;
+
+type PierrePatchDiffOptions = NonNullable<PatchDiffProps<undefined>["options"]>;
+
+const pierrePatchDiffOptions = {
+  disableFileHeader: true,
+  diffIndicators: "classic",
+  diffStyle: "unified",
+  hunkSeparators: "line-info-basic",
+  lineDiffType: "word",
+  overflow: "scroll"
+} satisfies PierrePatchDiffOptions;
+
+type PierrePatchDiffProps = PatchDiffProps<undefined>;
+
+const PierrePatchDiff = lazy(async () => {
+  const module = await import("@pierre/diffs/react");
+
+  return { default: module.PatchDiff as ComponentType<PierrePatchDiffProps> };
+});
 
 const providerKindLabels: Record<ProviderKind, string> = {
   customGitlab: "Custom GitLab",
@@ -3840,7 +3860,14 @@ function DiffHunkViewer({
                   {diffMode === "staged" ? "Unstage hunk" : "Stage hunk"}
                 </Button>
               </div>
-              <pre className="p-4 font-mono text-xs leading-5">{hunk.lines.join("\n")}</pre>
+              <Suspense fallback={<pre className="p-4 font-mono text-xs leading-5">{hunk.lines.join("\n")}</pre>}>
+                <PierrePatchDiff
+                  className="pierre-diff-viewer"
+                  disableWorkerPool
+                  options={pierrePatchDiffOptions}
+                  patch={buildHunkPatch(parsedDiff, hunk.id)}
+                />
+              </Suspense>
             </section>
           ))}
         </div>
