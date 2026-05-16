@@ -57,6 +57,29 @@ export type ProviderAccountInput = {
   token: string;
 };
 
+export type ProviderCheckStatus = "pending" | "running" | "success" | "failed" | "canceled" | "unknown";
+
+export type ProviderWorkItem = {
+  id: string;
+  providerKind: ProviderAccountKind;
+  accountId: string | null;
+  providerBaseUrl: string;
+  remoteName: string;
+  title: string;
+  author: string | null;
+  sourceBranch: string | null;
+  targetBranch: string | null;
+  state: string;
+  webUrl: string | null;
+  ciUrl: string | null;
+  checkStatus: ProviderCheckStatus;
+};
+
+export type ProviderWorkItemList = {
+  items: ProviderWorkItem[];
+  message: string;
+};
+
 export type ProviderConnectionResult = {
   accountId: string;
   ok: boolean;

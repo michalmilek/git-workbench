@@ -15,6 +15,7 @@
 mod git;
 mod operation_error;
 mod provider_accounts;
+mod provider_work_items;
 
 use git::GitOperationResult;
 use git::branch::BranchList;
@@ -197,7 +198,8 @@ pub fn run() -> tauri::Result<()> {
             provider_accounts::list_provider_accounts,
             provider_accounts::save_provider_account,
             provider_accounts::delete_provider_account,
-            provider_accounts::test_provider_connection
+            provider_accounts::test_provider_connection,
+            provider_work_items::list_provider_work_items
         ])
         .run(tauri::generate_context!())
 }

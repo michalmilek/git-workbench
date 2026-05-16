@@ -153,16 +153,12 @@ fn host_from_authority(authority: &str) -> Option<String> {
         Some((_, host)) => host,
         None => authority,
     };
-    let host = match host_with_port.split_once(':') {
-        Some((host, _)) => host,
-        None => host_with_port,
-    };
 
-    if host.is_empty() {
+    if host_with_port.is_empty() {
         return None;
     }
 
-    Some(host.to_owned())
+    Some(host_with_port.to_owned())
 }
 
 fn path_segments(path: Option<&str>) -> Vec<&str> {
@@ -202,7 +198,7 @@ fn detect_provider_kind(host: Option<&str>) -> ProviderKind {
     let Some(host) = host else {
         return ProviderKind::Unknown;
     };
-    let host = host.to_ascii_lowercase();
+    let host = host_without_port(host).to_ascii_lowercase();
     match host.as_str() {
         "github.com" => ProviderKind::Github,
         "gitlab.com" => ProviderKind::Gitlab,
@@ -221,6 +217,13 @@ fn provider_web_url(
     };
 
     Some(format!("https://{host}/{owner}/{repository}"))
+}
+
+fn host_without_port(host: &str) -> &str {
+    match host.split_once(':') {
+        Some((host, _)) => host,
+        None => host,
+    }
 }
 
 fn merge_remote_record(remotes: &mut Vec<ProviderRemote>, record: RemoteRecord) {
@@ -360,6 +363,29 @@ origin\thttps://github.com/openai/codex.git (push)\n",
                 fetch_url: None,
                 push_url: Some("ssh://git@gitlab.company.test/group/subgroup/repo.git".to_owned()),
                 web_url: Some("https://gitlab.company.test/group/subgroup/repo".to_owned()),
+            }]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_custom_gitlab_https_remote_with_port() -> Result<(), Box<dyn Error>> {
+        let remotes = parse_remote_output(
+            "origin\thttps://gitlab.company.test:8443/group/repo.git (fetch)\n",
+        )?;
+
+        assert_eq!(
+            remotes.remotes,
+            vec![ProviderRemote {
+                remote_name: "origin".to_owned(),
+                provider_kind: ProviderKind::CustomGitlab,
+                host: Some("gitlab.company.test:8443".to_owned()),
+                owner: Some("group".to_owned()),
+                repository: Some("repo".to_owned()),
+                fetch_url: Some("https://gitlab.company.test:8443/group/repo.git".to_owned()),
+                push_url: None,
+                web_url: Some("https://gitlab.company.test:8443/group/repo".to_owned()),
             }]
         );
 

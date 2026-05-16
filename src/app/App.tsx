@@ -1,10 +1,12 @@
 import {
   IconCloudUpload,
   IconDownload,
+  IconExternalLink,
   IconFileDiff,
   IconFolderOpen,
   IconGitBranch,
   IconGitCommit,
+  IconGitPullRequest,
   IconHistory,
   IconInbox,
   IconMinus,
@@ -15,6 +17,7 @@ import {
   IconTrash,
   IconUpload
 } from "@tabler/icons-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +32,7 @@ import {
   type CommandLogEntry
 } from "@/features/repository/command-log";
 import { isCommitSummaryValid } from "@/features/repository/commit-validation";
+import { trustedProviderUrl } from "@/features/repository/provider-links";
 import {
   applyStash,
   checkoutBranch,
@@ -46,6 +50,7 @@ import {
   listBranches,
   listCommitHistory,
   listProviderRemotes,
+  listProviderWorkItems,
   listStashes,
   popStash,
   pullRepository,
@@ -78,9 +83,11 @@ import type {
   GitOperationResult,
   ProviderAccount,
   ProviderAccountKind,
+  ProviderCheckStatus,
   ProviderConnectionResult,
   ProviderKind,
   ProviderRemote,
+  ProviderWorkItem,
   RepositoryStatus,
   StashEntry,
   StatusFile
@@ -145,6 +152,9 @@ export function App() {
   const [status, setStatus] = useState<RepositoryStatus | null>(null);
   const [providerRemotes, setProviderRemotes] = useState<ProviderRemote[]>([]);
   const [providerLoading, setProviderLoading] = useState(false);
+  const [providerWorkItems, setProviderWorkItems] = useState<ProviderWorkItem[]>([]);
+  const [providerWorkMessage, setProviderWorkMessage] = useState("");
+  const [providerWorkItemsLoading, setProviderWorkItemsLoading] = useState(false);
   const [providerAccounts, setProviderAccounts] = useState<ProviderAccount[]>([]);
   const [providerAccountsLoading, setProviderAccountsLoading] = useState(false);
   const [providerAccountKind, setProviderAccountKind] = useState<ProviderAccountKind>("github");
@@ -178,7 +188,9 @@ export function App() {
   const diffRequestId = useRef(0);
   const referenceRequestId = useRef(0);
   const providerRequestId = useRef(0);
+  const providerWorkItemsRequestId = useRef(0);
   const providerAccountsRequestId = useRef(0);
+  const providerAccountActionRequestId = useRef(0);
   const historyRequestId = useRef(0);
   const commitDetailsRequestId = useRef(0);
   const commandLogId = useRef(0);
@@ -253,6 +265,7 @@ export function App() {
     invalidateDiffRequests();
     invalidateHistoryRequests();
     const providerRequest = createProviderRequest();
+    const providerWorkItemsRequest = createProviderWorkItemsRequest();
     const requestedCommitOid = path === repositoryPath ? selectedCommitOid : null;
     const switchingRepository = path !== repositoryPath;
     const referenceRequest = createReferenceRequest();
@@ -270,6 +283,8 @@ export function App() {
       if (switchingRepository) {
         clearHistoryState();
         setProviderRemotes([]);
+        setProviderWorkItems([]);
+        setProviderWorkMessage("");
       }
       setRepositoryPath(path);
       setStatus(nextStatus);
@@ -288,7 +303,8 @@ export function App() {
       await Promise.all([
         loadRepositoryReferences(path, referenceRequest),
         loadRepositoryHistory(path, requestedCommitOid),
-        loadProviderRemotes(path, providerRequest)
+        loadProviderRemotes(path, providerRequest),
+        loadProviderWorkItems(path, providerWorkItemsRequest)
       ]);
     } catch (error) {
       if (!isCurrentRepositoryLoadRequest(repositoryLoadRequest)) {
@@ -304,6 +320,9 @@ export function App() {
         setStashes([]);
         setProviderRemotes([]);
         setProviderLoading(false);
+        setProviderWorkItems([]);
+        setProviderWorkMessage("");
+        setProviderWorkItemsLoading(false);
         setSelectedStashRef(null);
         clearHistoryState();
       }
@@ -336,6 +355,30 @@ export function App() {
     } finally {
       if (isCurrentProviderRequest(requestId)) {
         setProviderLoading(false);
+      }
+    }
+  }
+
+  async function loadProviderWorkItems(path: string, requestId: number) {
+    setProviderWorkItemsLoading(true);
+
+    try {
+      const nextProviderWorkItems = await listProviderWorkItems(path);
+      if (isCurrentProviderWorkItemsRequest(requestId)) {
+        setProviderWorkItems(nextProviderWorkItems.items);
+        setProviderWorkMessage(nextProviderWorkItems.message);
+      }
+    } catch (error) {
+      if (isCurrentProviderWorkItemsRequest(requestId)) {
+        const operationError = describeOperationError(error);
+        setFeedback({ kind: "error", error: operationError });
+        recordOperationError("List provider work items", operationError);
+        setProviderWorkItems([]);
+        setProviderWorkMessage("");
+      }
+    } finally {
+      if (isCurrentProviderWorkItemsRequest(requestId)) {
+        setProviderWorkItemsLoading(false);
       }
     }
   }
@@ -717,60 +760,112 @@ export function App() {
       return;
     }
 
+    const requestId = createProviderAccountActionRequest();
+    const workItemRepositoryPath = repositoryPath;
+    const repositoryRequest = repositoryLoadRequestId.current;
     setProviderAccountAction("save-account");
     setActiveProviderAccountId(null);
 
     try {
       const account = await saveProviderAccount(input);
+      if (!isCurrentProviderAccountActionRequest(requestId)) {
+        return;
+      }
+
       setProviderAccounts((accounts) => upsertProviderAccount(accounts, account));
       setProviderConnectionResults((results) => removeProviderConnectionResult(results, account.id));
       setProviderAccountToken("");
       recordProviderAccountSaveResult(account);
+      await refreshProviderWorkItemsAfterProviderAccountChange(workItemRepositoryPath, repositoryRequest, requestId);
     } catch (error) {
-      const operationError = describeOperationError(error);
-      setFeedback({ kind: "error", error: operationError });
-      recordOperationError("Save provider account", operationError);
+      if (isCurrentProviderAccountActionRequest(requestId)) {
+        const operationError = describeOperationError(error);
+        setFeedback({ kind: "error", error: operationError });
+        recordOperationError("Save provider account", operationError);
+      }
     } finally {
-      setProviderAccountAction(null);
+      if (isCurrentProviderAccountActionRequest(requestId)) {
+        setProviderAccountAction(null);
+      }
     }
   }
 
   async function deleteSavedProviderAccount(account: ProviderAccount) {
+    const requestId = createProviderAccountActionRequest();
+    const workItemRepositoryPath = repositoryPath;
+    const repositoryRequest = repositoryLoadRequestId.current;
     setProviderAccountAction("delete-account");
     setActiveProviderAccountId(account.id);
 
     try {
       const result = await deleteProviderAccount(account.id);
+      if (!isCurrentProviderAccountActionRequest(requestId)) {
+        return;
+      }
+
       setProviderAccounts((accounts) => accounts.filter((providerAccount) => providerAccount.id !== account.id));
       setProviderConnectionResults((results) => removeProviderConnectionResult(results, account.id));
       setFeedback({ kind: "result", result });
       recordOperationResult("Delete provider account", result);
+      await refreshProviderWorkItemsAfterProviderAccountChange(workItemRepositoryPath, repositoryRequest, requestId);
     } catch (error) {
-      const operationError = describeOperationError(error);
-      setFeedback({ kind: "error", error: operationError });
-      recordOperationError("Delete provider account", operationError);
+      if (isCurrentProviderAccountActionRequest(requestId)) {
+        const operationError = describeOperationError(error);
+        setFeedback({ kind: "error", error: operationError });
+        recordOperationError("Delete provider account", operationError);
+      }
     } finally {
-      setProviderAccountAction(null);
-      setActiveProviderAccountId(null);
+      if (isCurrentProviderAccountActionRequest(requestId)) {
+        setProviderAccountAction(null);
+        setActiveProviderAccountId(null);
+      }
     }
   }
 
   async function testSavedProviderAccount(account: ProviderAccount) {
+    const requestId = createProviderAccountActionRequest();
+    const workItemRepositoryPath = repositoryPath;
+    const repositoryRequest = repositoryLoadRequestId.current;
     setProviderAccountAction("test-account");
     setActiveProviderAccountId(account.id);
 
     try {
       const result = await testProviderConnection(account.id);
+      if (!isCurrentProviderAccountActionRequest(requestId)) {
+        return;
+      }
+
       setProviderConnectionResults((results) => ({ ...results, [result.accountId]: result }));
       recordProviderConnectionResult(result);
+      await refreshProviderWorkItemsAfterProviderAccountChange(workItemRepositoryPath, repositoryRequest, requestId);
     } catch (error) {
-      const operationError = describeOperationError(error);
-      setFeedback({ kind: "error", error: operationError });
-      recordOperationError("Test provider connection", operationError);
+      if (isCurrentProviderAccountActionRequest(requestId)) {
+        const operationError = describeOperationError(error);
+        setFeedback({ kind: "error", error: operationError });
+        recordOperationError("Test provider connection", operationError);
+      }
     } finally {
-      setProviderAccountAction(null);
-      setActiveProviderAccountId(null);
+      if (isCurrentProviderAccountActionRequest(requestId)) {
+        setProviderAccountAction(null);
+        setActiveProviderAccountId(null);
+      }
     }
+  }
+
+  async function refreshProviderWorkItemsAfterProviderAccountChange(
+    path: string | null,
+    repositoryRequest: number,
+    accountRequest: number
+  ) {
+    if (
+      path === null ||
+      !isCurrentProviderAccountActionRequest(accountRequest) ||
+      !isCurrentRepositoryLoadRequest(repositoryRequest)
+    ) {
+      return;
+    }
+
+    await loadProviderWorkItems(path, createProviderWorkItemsRequest());
   }
 
   function rememberRepository(path: string) {
@@ -884,6 +979,24 @@ export function App() {
 
   function isCurrentProviderRequest(requestId: number): boolean {
     return providerRequestId.current === requestId;
+  }
+
+  function createProviderWorkItemsRequest(): number {
+    providerWorkItemsRequestId.current += 1;
+    return providerWorkItemsRequestId.current;
+  }
+
+  function isCurrentProviderWorkItemsRequest(requestId: number): boolean {
+    return providerWorkItemsRequestId.current === requestId;
+  }
+
+  function createProviderAccountActionRequest(): number {
+    providerAccountActionRequestId.current += 1;
+    return providerAccountActionRequestId.current;
+  }
+
+  function isCurrentProviderAccountActionRequest(requestId: number): boolean {
+    return providerAccountActionRequestId.current === requestId;
   }
 
   function createHistoryRequest(): number {
@@ -1507,6 +1620,13 @@ export function App() {
 
           <ProviderRemotesPanel loading={providerLoading} remotes={providerRemotes} repositoryOpened={repositoryPath !== null} />
 
+          <ProviderWorkItemsPanel
+            items={providerWorkItems}
+            loading={providerWorkItemsLoading}
+            message={providerWorkMessage}
+            repositoryOpened={repositoryPath !== null}
+          />
+
           <ProviderAccountsPanel
             accounts={providerAccounts}
             action={providerAccountAction}
@@ -1838,6 +1958,44 @@ function ProviderRemotesPanel({
   );
 }
 
+function ProviderWorkItemsPanel({
+  items,
+  loading,
+  message,
+  repositoryOpened
+}: {
+  items: ProviderWorkItem[];
+  loading: boolean;
+  message: string;
+  repositoryOpened: boolean;
+}) {
+  return (
+    <div className="mt-4 flex flex-col gap-3 rounded-md border bg-background p-3 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 font-medium">
+          <IconGitPullRequest aria-hidden="true" className="size-4 shrink-0" />
+          Work items
+        </div>
+        <Badge variant={loading ? "outline" : "secondary"}>{loading ? "Loading" : items.length}</Badge>
+      </div>
+
+      <div className="flex max-h-72 flex-col gap-2 overflow-auto">
+        {!repositoryOpened ? (
+          <p className="text-sm text-muted-foreground">No repository</p>
+        ) : items.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{loading ? "Loading" : formatProviderWorkMessage(message)}</p>
+        ) : (
+          items.map((item) => <ProviderWorkItemCard item={item} key={item.id} />)
+        )}
+      </div>
+
+      {repositoryOpened && items.length > 0 && message.length > 0 ? (
+        <p className="text-xs text-muted-foreground">{message}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function ProviderAccountsPanel({
   accounts,
   action,
@@ -1986,6 +2144,35 @@ function ProviderAccountsPanel({
   );
 }
 
+function ProviderWorkItemCard({ item }: { item: ProviderWorkItem }) {
+  return (
+    <div className="rounded-md border p-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate font-medium">{item.title}</p>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+            {formatWorkItemAuthor(item.author)} | {formatWorkItemBranchFlow(item.sourceBranch, item.targetBranch)}
+          </p>
+        </div>
+        <Badge className="shrink-0" variant="secondary">
+          {providerKindLabels[item.providerKind]}
+        </Badge>
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-1">
+        <Badge variant="outline">{item.remoteName}</Badge>
+        <Badge variant="outline">{item.state}</Badge>
+        <Badge variant={providerCheckStatusBadgeVariant(item.checkStatus)}>CI: {item.checkStatus}</Badge>
+      </div>
+
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <ProviderExternalLink label="PR/MR" providerBaseUrl={item.providerBaseUrl} url={item.webUrl} />
+        <ProviderExternalLink label="CI" providerBaseUrl={item.providerBaseUrl} url={item.ciUrl} />
+      </div>
+    </div>
+  );
+}
+
 function ProviderAccountCard({
   account,
   action,
@@ -2053,6 +2240,40 @@ function ProviderAccountCard({
   );
 }
 
+function ProviderExternalLink({
+  label,
+  providerBaseUrl,
+  url
+}: {
+  label: string;
+  providerBaseUrl: string;
+  url: string | null;
+}) {
+  const trustedUrl = trustedProviderUrl(url, providerBaseUrl);
+
+  if (trustedUrl === null) {
+    return (
+      <Button disabled size="sm" type="button" variant="outline">
+        {label}
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      onClick={() => {
+        openProviderUrl(trustedUrl);
+      }}
+      size="sm"
+      type="button"
+      variant="secondary"
+    >
+      <IconExternalLink aria-hidden="true" data-icon="inline-start" />
+      {label}
+    </Button>
+  );
+}
+
 function ProviderConnectionBadge({ result }: { result: ProviderConnectionResult | undefined }) {
   if (result === undefined) {
     return <Badge variant="outline">Not tested</Badge>;
@@ -2106,6 +2327,43 @@ function ProviderUrlAvailability({ label, url }: { label: string; url: string | 
       {label}: {available ? "yes" : "no"}
     </Badge>
   );
+}
+
+function formatProviderWorkMessage(message: string): string {
+  return message.length === 0 ? "No PRs or MRs found." : message;
+}
+
+function formatWorkItemAuthor(author: string | null): string {
+  return author ?? "unknown author";
+}
+
+function formatWorkItemBranchFlow(sourceBranch: string | null, targetBranch: string | null): string {
+  return `${sourceBranch ?? "unknown"} -> ${targetBranch ?? "unknown"}`;
+}
+
+function providerCheckStatusBadgeVariant(status: ProviderCheckStatus): "secondary" | "destructive" | "outline" {
+  if (status === "success") {
+    return "secondary";
+  }
+
+  if (status === "failed" || status === "canceled") {
+    return "destructive";
+  }
+
+  return "outline";
+}
+
+function openProviderUrl(url: string) {
+  if (hasTauriRuntime()) {
+    void openUrl(url);
+    return;
+  }
+
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function hasTauriRuntime(): boolean {
+  return "__TAURI_INTERNALS__" in window;
 }
 
 function formatProviderValue(value: string | null): string {
