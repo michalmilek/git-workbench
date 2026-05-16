@@ -71,6 +71,30 @@ struct ProviderAccountMetadata {
     label: String,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub struct ProviderAccountToken {
+    account_id: String,
+    base_url: String,
+    token: String,
+}
+
+impl ProviderAccountToken {
+    #[must_use]
+    pub fn account_id(&self) -> &str {
+        &self.account_id
+    }
+
+    #[must_use]
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    #[must_use]
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+}
+
 impl ProviderAccountMetadata {
     fn from_input(input: &ProviderAccountInput) -> Result<Self, OperationError> {
         let base_url = normalized_base_url(&input.base_url);
@@ -303,6 +327,36 @@ pub const fn user_agent_header_value() -> &'static str {
     USER_AGENT_VALUE
 }
 
+pub fn find_provider_account_token(
+    app_handle: &AppHandle,
+    provider_kind: ProviderKind,
+    base_url: &str,
+) -> Result<Option<ProviderAccountToken>, OperationError> {
+    let config_dir = app_config_dir(app_handle)?;
+    find_provider_account_token_from_config_dir(
+        &config_dir,
+        provider_kind,
+        base_url,
+        read_provider_token,
+    )
+}
+
+pub fn find_provider_account_token_by_host_and_owner(
+    app_handle: &AppHandle,
+    provider_kind: ProviderKind,
+    host: &str,
+    owner: &str,
+) -> Result<Option<ProviderAccountToken>, OperationError> {
+    let config_dir = app_config_dir(app_handle)?;
+    find_provider_account_token_by_host_and_owner_from_config_dir(
+        &config_dir,
+        provider_kind,
+        host,
+        owner,
+        read_provider_token,
+    )
+}
+
 fn delete_provider_account_metadata(
     config_dir: &Path,
     account_id: &str,
@@ -327,6 +381,80 @@ fn find_provider_account_metadata(
         .accounts
         .into_iter()
         .find(|account| account.id == account_id))
+}
+
+fn find_provider_account_token_from_config_dir(
+    config_dir: &Path,
+    provider_kind: ProviderKind,
+    base_url: &str,
+    mut read_token: impl FnMut(&str) -> Result<Option<String>, OperationError>,
+) -> Result<Option<ProviderAccountToken>, OperationError> {
+    let base_url = normalized_base_url(base_url);
+    validate_https_base_url(&base_url)?;
+    let store = read_store(config_dir)?;
+
+    for metadata in store
+        .accounts
+        .into_iter()
+        .filter(|account| account.provider_kind == provider_kind && account.base_url == base_url)
+    {
+        if let Some(token) = read_token(&metadata.id)? {
+            return Ok(Some(ProviderAccountToken {
+                account_id: metadata.id,
+                base_url: metadata.base_url,
+                token,
+            }));
+        }
+    }
+
+    Ok(None)
+}
+
+fn find_provider_account_token_by_host_and_owner_from_config_dir(
+    config_dir: &Path,
+    provider_kind: ProviderKind,
+    host: &str,
+    owner: &str,
+    read_token: impl FnMut(&str) -> Result<Option<String>, OperationError>,
+) -> Result<Option<ProviderAccountToken>, OperationError> {
+    find_provider_account_token_by_host_match(
+        config_dir,
+        provider_kind,
+        host,
+        Some(owner),
+        read_token,
+    )
+}
+
+fn find_provider_account_token_by_host_match(
+    config_dir: &Path,
+    provider_kind: ProviderKind,
+    host: &str,
+    owner: Option<&str>,
+    mut read_token: impl FnMut(&str) -> Result<Option<String>, OperationError>,
+) -> Result<Option<ProviderAccountToken>, OperationError> {
+    let host = normalized_authority(host);
+    let store = read_store(config_dir)?;
+    let mut accounts = store
+        .accounts
+        .into_iter()
+        .filter(|account| account.provider_kind == provider_kind)
+        .filter(|account| base_url_matches_remote_authority(&account.base_url, &host))
+        .filter(|account| base_url_matches_owner(&account.base_url, owner))
+        .collect::<Vec<_>>();
+    accounts.sort_by(compare_metadata_specificity);
+
+    for metadata in accounts {
+        if let Some(token) = read_token(&metadata.id)? {
+            return Ok(Some(ProviderAccountToken {
+                account_id: metadata.id,
+                base_url: metadata.base_url,
+                token,
+            }));
+        }
+    }
+
+    Ok(None)
 }
 
 fn read_store(config_dir: &Path) -> Result<ProviderAccountStore, OperationError> {
@@ -381,6 +509,15 @@ fn compare_metadata(
         .then_with(|| left.base_url.cmp(&right.base_url))
         .then_with(|| left.label.cmp(&right.label))
         .then_with(|| left.id.cmp(&right.id))
+}
+
+fn compare_metadata_specificity(
+    left: &ProviderAccountMetadata,
+    right: &ProviderAccountMetadata,
+) -> std::cmp::Ordering {
+    base_url_path_len(&right.base_url)
+        .cmp(&base_url_path_len(&left.base_url))
+        .then_with(|| compare_metadata(left, right))
 }
 
 fn app_config_dir(app_handle: &AppHandle) -> Result<PathBuf, OperationError> {
@@ -506,6 +643,66 @@ fn normalized_base_url(base_url: &str) -> String {
     base_url.trim().trim_end_matches('/').to_ascii_lowercase()
 }
 
+fn normalized_authority(authority: &str) -> String {
+    authority.trim().to_ascii_lowercase()
+}
+
+fn base_url_matches_remote_authority(base_url: &str, remote_authority: &str) -> bool {
+    let Some(base_authority) = base_url_authority(base_url) else {
+        return false;
+    };
+
+    if remote_authority.contains(':') {
+        return base_authority == remote_authority;
+    }
+
+    authority_host(base_authority) == remote_authority
+}
+
+fn base_url_authority(base_url: &str) -> Option<&str> {
+    let rest = base_url.strip_prefix("https://")?;
+    let authority = rest.split('/').next()?;
+    if authority.is_empty() {
+        return None;
+    }
+
+    Some(authority)
+}
+
+fn authority_host(authority: &str) -> &str {
+    match authority.split_once(':') {
+        Some((host, _)) => host,
+        None => authority,
+    }
+}
+
+fn base_url_path_len(base_url: &str) -> usize {
+    base_url_path(base_url).map_or(0, str::len)
+}
+
+fn base_url_matches_owner(base_url: &str, owner: Option<&str>) -> bool {
+    let Some(owner) = owner else {
+        return true;
+    };
+    let Some(base_path) = base_url_path(base_url) else {
+        return true;
+    };
+
+    owner == base_path || owner.starts_with(&format!("{base_path}/"))
+}
+
+fn base_url_path(base_url: &str) -> Option<&str> {
+    let (_, path) = base_url
+        .strip_prefix("https://")
+        .and_then(|rest| rest.split_once('/'))?;
+    let path = path.trim_matches('/');
+    if path.is_empty() {
+        return None;
+    }
+
+    Some(path)
+}
+
 fn validate_https_base_url(base_url: &str) -> Result<(), OperationError> {
     if base_url.starts_with("https://") {
         return Ok(());
@@ -540,7 +737,8 @@ mod tests {
 
     use super::{
         ProviderAccountInput, ProviderKind, account_id_for_input, api_user_url,
-        authorization_header_value, keychain_account_name, keychain_service_name,
+        authorization_header_value, find_provider_account_token_by_host_and_owner_from_config_dir,
+        find_provider_account_token_from_config_dir, keychain_account_name, keychain_service_name,
         list_provider_accounts_from_config_dir, lowercase_hex, save_provider_account_metadata,
         user_agent_header_value,
     };
@@ -696,6 +894,164 @@ mod tests {
             "Bearer secret-token"
         );
         assert_eq!(user_agent_header_value(), "git-workbench");
+    }
+
+    #[test]
+    fn finds_matching_provider_account_token_without_serializing_token()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let config_dir = temp_config_dir()?;
+        let input = ProviderAccountInput {
+            provider_kind: ProviderKind::Github,
+            base_url: String::from("https://github.com/"),
+            label: String::from("Personal"),
+            token: String::from("secret-token"),
+        };
+        let account = save_provider_account_metadata(&config_dir, &input, true)?;
+        let access = find_provider_account_token_from_config_dir(
+            &config_dir,
+            ProviderKind::Github,
+            "https://github.com",
+            |account_id| {
+                assert_eq!(account_id, account.id);
+                Ok(Some(String::from("secret-token")))
+            },
+        )?;
+        let Some(access) = access else {
+            return Err("missing provider account token".into());
+        };
+        let accounts = list_provider_accounts_from_config_dir(&config_dir, |_| Ok(true))?;
+        let encoded_accounts = serde_json::to_string(&accounts)?;
+
+        assert_eq!(access.account_id(), account.id);
+        assert_eq!(access.base_url(), "https://github.com");
+        assert_eq!(access.token(), "secret-token");
+        assert!(!encoded_accounts.contains("secret-token"));
+        fs::remove_dir_all(config_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn finds_custom_gitlab_token_by_host_with_root_path_and_port()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let config_dir = temp_config_dir()?;
+        let input = ProviderAccountInput {
+            provider_kind: ProviderKind::CustomGitlab,
+            base_url: String::from("https://gitlab.company.test:8443/gitlab"),
+            label: String::from("Company"),
+            token: String::from("secret-token"),
+        };
+        let account = save_provider_account_metadata(&config_dir, &input, true)?;
+        let access = find_provider_account_token_by_host_and_owner_from_config_dir(
+            &config_dir,
+            ProviderKind::CustomGitlab,
+            "gitlab.company.test",
+            "gitlab/platform",
+            |account_id| {
+                assert_eq!(account_id, account.id);
+                Ok(Some(String::from("secret-token")))
+            },
+        )?;
+        let Some(access) = access else {
+            return Err("missing provider account token".into());
+        };
+
+        assert_eq!(access.account_id(), account.id);
+        assert_eq!(access.base_url(), "https://gitlab.company.test:8443/gitlab");
+        assert_eq!(access.token(), "secret-token");
+        fs::remove_dir_all(config_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn finds_custom_gitlab_token_by_host_and_matching_owner_path()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let config_dir = temp_config_dir()?;
+        let root_a = save_provider_account_metadata(
+            &config_dir,
+            &ProviderAccountInput {
+                provider_kind: ProviderKind::CustomGitlab,
+                base_url: String::from("https://gitlab.company.test/root-a"),
+                label: String::from("Root A"),
+                token: String::new(),
+            },
+            true,
+        )?;
+        let root_b = save_provider_account_metadata(
+            &config_dir,
+            &ProviderAccountInput {
+                provider_kind: ProviderKind::CustomGitlab,
+                base_url: String::from("https://gitlab.company.test/root-b"),
+                label: String::from("Root B"),
+                token: String::new(),
+            },
+            true,
+        )?;
+        let access = find_provider_account_token_by_host_and_owner_from_config_dir(
+            &config_dir,
+            ProviderKind::CustomGitlab,
+            "gitlab.company.test",
+            "root-b/platform",
+            |account_id| {
+                assert_ne!(account_id, root_a.id);
+                assert_eq!(account_id, root_b.id);
+                Ok(Some(String::from("root-b-token")))
+            },
+        )?;
+        let Some(access) = access else {
+            return Err("missing provider account token".into());
+        };
+
+        assert_eq!(access.account_id(), root_b.id);
+        assert_eq!(access.base_url(), "https://gitlab.company.test/root-b");
+        assert_eq!(access.token(), "root-b-token");
+        fs::remove_dir_all(config_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn finds_custom_gitlab_token_by_host_owner_and_port() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let config_dir = temp_config_dir()?;
+        let port_8443 = save_provider_account_metadata(
+            &config_dir,
+            &ProviderAccountInput {
+                provider_kind: ProviderKind::CustomGitlab,
+                base_url: String::from("https://gitlab.company.test:8443/root"),
+                label: String::from("Port 8443"),
+                token: String::new(),
+            },
+            true,
+        )?;
+        let port_9443 = save_provider_account_metadata(
+            &config_dir,
+            &ProviderAccountInput {
+                provider_kind: ProviderKind::CustomGitlab,
+                base_url: String::from("https://gitlab.company.test:9443/root"),
+                label: String::from("Port 9443"),
+                token: String::new(),
+            },
+            true,
+        )?;
+        let access = find_provider_account_token_by_host_and_owner_from_config_dir(
+            &config_dir,
+            ProviderKind::CustomGitlab,
+            "gitlab.company.test:9443",
+            "root/platform",
+            |account_id| {
+                assert_ne!(account_id, port_8443.id);
+                assert_eq!(account_id, port_9443.id);
+                Ok(Some(String::from("port-9443-token")))
+            },
+        )?;
+        let Some(access) = access else {
+            return Err("missing provider account token".into());
+        };
+
+        assert_eq!(access.account_id(), port_9443.id);
+        assert_eq!(access.base_url(), "https://gitlab.company.test:9443/root");
+        assert_eq!(access.token(), "port-9443-token");
+        fs::remove_dir_all(config_dir)?;
+        Ok(())
     }
 
     fn temp_config_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {

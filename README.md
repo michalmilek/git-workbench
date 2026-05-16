@@ -32,6 +32,9 @@ Implemented on `main`:
 - Provider account configuration with non-secret metadata in app config.
 - Provider token storage in the OS keychain.
 - Provider API connection testing for configured accounts.
+- Provider PR/MR work item list for the active repository.
+- Provider CI/check/pipeline status for listed PRs and MRs.
+- External PR/MR and CI/pipeline links through the system opener.
 - Latest operation result/error panel with command, stdout, and stderr.
 - Persistent command log in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
@@ -39,7 +42,7 @@ Implemented on `main`:
 Not implemented yet:
 
 - Hunk-level staging.
-- PR/MR views and CI status.
+- Full PR/MR review and inline commenting.
 - Merge/rebase preview and conflict recovery.
 
 See [docs/roadmap.md](docs/roadmap.md) for the active roadmap.
@@ -133,7 +136,8 @@ docs/
 
 ## Next Milestone
 
-The next milestone is provider setup:
+The next milestone is safe complex operations:
 
-- Show PR/MR lists and CI status for the active repository.
-- Open PR/MR and pipeline links externally.
+- Add merge and rebase previews.
+- Show planned command intent and likely conflict files where available.
+- Add conflict display and recovery actions.

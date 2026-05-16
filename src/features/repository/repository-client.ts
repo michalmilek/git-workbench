@@ -10,6 +10,7 @@ import type {
   ProviderAccountInput,
   ProviderConnectionResult,
   ProviderRemoteList,
+  ProviderWorkItemList,
   RepositoryStatus,
   StashEntry
 } from "./repository-types";
@@ -58,6 +59,7 @@ type InvokeCommand = <T>(command: string, args: Record<string, unknown>) => Prom
 export type RepositoryClient = {
   getRepositoryStatus(repositoryPath: string): Promise<RepositoryStatus>;
   listProviderRemotes(repositoryPath: string): Promise<ProviderRemoteList>;
+  listProviderWorkItems(repositoryPath: string): Promise<ProviderWorkItemList>;
   listProviderAccounts(): Promise<ProviderAccount[]>;
   saveProviderAccount(input: ProviderAccountInput): Promise<ProviderAccount>;
   deleteProviderAccount(accountId: string): Promise<GitOperationResult>;
@@ -119,6 +121,9 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
     },
     listProviderRemotes(repositoryPath) {
       return invokeCommand<ProviderRemoteList>("list_provider_remotes", { repositoryPath });
+    },
+    listProviderWorkItems(repositoryPath) {
+      return invokeCommand<ProviderWorkItemList>("list_provider_work_items", { repositoryPath });
     },
     listProviderAccounts() {
       return invokeCommand<ProviderAccount[]>("list_provider_accounts", {});
@@ -244,6 +249,9 @@ export function getBrowserRepositoryClient(): RepositoryClient {
         ]
       });
     },
+    listProviderWorkItems() {
+      return Promise.resolve(browserProviderWorkItems);
+    },
     listProviderAccounts() {
       return Promise.resolve(Array.from(browserProviderAccounts.values()).map(copyProviderAccount));
     },
@@ -321,6 +329,10 @@ export function getRepositoryStatus(repositoryPath: string): Promise<RepositoryS
 
 export function listProviderRemotes(repositoryPath: string): Promise<ProviderRemoteList> {
   return repositoryClient.listProviderRemotes(repositoryPath);
+}
+
+export function listProviderWorkItems(repositoryPath: string): Promise<ProviderWorkItemList> {
+  return repositoryClient.listProviderWorkItems(repositoryPath);
 }
 
 export function listProviderAccounts(): Promise<ProviderAccount[]> {
@@ -424,6 +436,42 @@ function browserMutationResult(command: string): GitOperationResult {
 }
 
 const browserProviderAccounts = new Map<string, ProviderAccount>();
+
+const browserProviderWorkItems: ProviderWorkItemList = {
+  items: [
+    {
+      accountId: "browser-github-github-com-personal-github",
+      author: "alex-rivera",
+      checkStatus: "running",
+      ciUrl: "https://github.com/openai/codex/actions/runs/1516",
+      id: "github:origin:42",
+      providerBaseUrl: "https://github.com",
+      providerKind: "github",
+      remoteName: "origin",
+      sourceBranch: "feature/provider-work-panel",
+      state: "open",
+      targetBranch: "main",
+      title: "Add provider work panel",
+      webUrl: "https://github.com/openai/codex/pull/42"
+    },
+    {
+      accountId: "browser-customGitlab-gitlab-company-test-company-gitlab",
+      author: "sam-chen",
+      checkStatus: "failed",
+      ciUrl: "https://gitlab.company.test/platform/workbench/-/pipelines/20260516",
+      id: "gitlab:company:17",
+      providerBaseUrl: "https://gitlab.company.test",
+      providerKind: "customGitlab",
+      remoteName: "company",
+      sourceBranch: "fix/provider-refresh",
+      state: "opened",
+      targetBranch: "main",
+      title: "Refresh provider work after account changes",
+      webUrl: "https://gitlab.company.test/platform/workbench/-/merge_requests/17"
+    }
+  ],
+  message: "Browser preview provider work items."
+};
 
 function createBrowserProviderAccount(input: ProviderAccountInput): ProviderAccount {
   const baseUrl = input.baseUrl.trim();

@@ -30,6 +30,9 @@ The repository already includes:
 - Provider account configuration with non-secret metadata in app config.
 - Provider token storage in the OS keychain.
 - Provider API connection testing for configured accounts.
+- Provider PR/MR work item list for the active repository.
+- Provider CI/check/pipeline status for listed PRs and MRs.
+- External PR/MR and CI/pipeline links through the system opener.
 - Persistent command log stored in localStorage.
 - Browser fallback client for Vite smoke testing outside the Tauri runtime.
 
@@ -62,6 +65,9 @@ These items are already implemented on `main`:
 - Provider account configuration with non-secret metadata in app config.
 - Provider token storage in the OS keychain.
 - Provider API connection testing for configured accounts.
+- Provider PR/MR work item list for the active repository.
+- Provider CI/check/pipeline status for listed PRs and MRs.
+- External PR/MR and CI/pipeline links through the system opener.
 - Latest operation result/error display with command, stdout, and stderr.
 - Persistent command log stored in localStorage.
 - Frontend tests for repository summaries, recents, commit validation, and Tauri invoke payloads.
@@ -114,9 +120,9 @@ Goal: make GitHub, GitLab.com, and company GitLab instances first-class without 
 - Done: store provider tokens in the OS keychain.
 - Done: keep non-secret provider metadata in local app config.
 - Done: test provider API connections.
-- Show PR/MR lists for the active repository.
-- Show CI/check/pipeline status.
-- Open PR/MR and pipeline links externally.
+- Done: show PR/MR lists for the active repository.
+- Done: show CI/check/pipeline status.
+- Done: open PR/MR and pipeline links externally.
 - Keep push and pull using the user's existing system Git, SSH agent, credential helper, and VPN setup.
 
 ## P3: Safe Complex Operations
@@ -183,6 +189,6 @@ Frontend code must continue to reject non-null assertions. Rust code must contin
 9. Done: persistent command log.
 10. Done: commit history and branch graph.
 11. Done: provider detection and account setup.
-12. Next: PR/MR list and CI status.
-13. Later: merge and rebase preview.
+12. Done: PR/MR list and CI status.
+13. Next: merge and rebase preview.
 14. Later: conflict display and recovery.

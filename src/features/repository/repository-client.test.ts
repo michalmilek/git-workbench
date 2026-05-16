@@ -7,6 +7,7 @@ import type {
   GitOperationResult,
   ProviderAccount,
   ProviderConnectionResult,
+  ProviderWorkItemList,
   ProviderRemoteList,
   RepositoryStatus,
   StashEntry
@@ -28,6 +29,7 @@ describe("createRepositoryClient", () => {
 
     await client.getRepositoryStatus("/repo");
     await client.listProviderRemotes("/repo");
+    await client.listProviderWorkItems("/repo");
     await client.getFileDiff({ filePath: "src/App.tsx", repositoryPath: "/repo", staged: true });
     await client.stageFile({ filePath: "src/App.tsx", repositoryPath: "/repo" });
     await client.unstageFile({ filePath: "src/App.tsx", repositoryPath: "/repo" });
@@ -59,6 +61,7 @@ describe("createRepositoryClient", () => {
     expect(calls).toEqual([
       { args: { repositoryPath: "/repo" }, command: "get_repository_status" },
       { args: { repositoryPath: "/repo" }, command: "list_provider_remotes" },
+      { args: { repositoryPath: "/repo" }, command: "list_provider_work_items" },
       {
         args: { filePath: "src/App.tsx", repositoryPath: "/repo", staged: true },
         command: "get_file_diff"
@@ -132,6 +135,41 @@ describe("browser repository client", () => {
           webUrl: "https://gitlab.company.test/platform/workbench"
         }
       ]
+    });
+    await expect(client.listProviderWorkItems("/repo")).resolves.toEqual({
+      items: [
+        {
+          accountId: "browser-github-github-com-personal-github",
+          author: "alex-rivera",
+          checkStatus: "running",
+          ciUrl: "https://github.com/openai/codex/actions/runs/1516",
+          id: "github:origin:42",
+          providerBaseUrl: "https://github.com",
+          providerKind: "github",
+          remoteName: "origin",
+          sourceBranch: "feature/provider-work-panel",
+          state: "open",
+          targetBranch: "main",
+          title: "Add provider work panel",
+          webUrl: "https://github.com/openai/codex/pull/42"
+        },
+        {
+          accountId: "browser-customGitlab-gitlab-company-test-company-gitlab",
+          author: "sam-chen",
+          checkStatus: "failed",
+          ciUrl: "https://gitlab.company.test/platform/workbench/-/pipelines/20260516",
+          id: "gitlab:company:17",
+          providerBaseUrl: "https://gitlab.company.test",
+          providerKind: "customGitlab",
+          remoteName: "company",
+          sourceBranch: "fix/provider-refresh",
+          state: "opened",
+          targetBranch: "main",
+          title: "Refresh provider work after account changes",
+          webUrl: "https://gitlab.company.test/platform/workbench/-/merge_requests/17"
+        }
+      ],
+      message: "Browser preview provider work items."
     });
     await expect(client.stageFile({ filePath: "src/app/App.tsx", repositoryPath: "/repo" })).resolves.toEqual({
       command: "git add -- src/app/App.tsx",
@@ -251,6 +289,7 @@ function responseForCommand(
   | BranchList
   | StashEntry[]
   | ProviderRemoteList
+  | ProviderWorkItemList
   | ProviderAccount[]
   | ProviderAccount
   | ProviderConnectionResult
@@ -279,6 +318,10 @@ function responseForCommand(
 
   if (command === "list_provider_remotes") {
     return Promise.resolve({ remotes: [] });
+  }
+
+  if (command === "list_provider_work_items") {
+    return Promise.resolve({ items: [], message: "No provider work items." });
   }
 
   if (command === "list_provider_accounts") {
