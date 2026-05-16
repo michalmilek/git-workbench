@@ -36,6 +36,8 @@ describe("createRepositoryClient", () => {
         continueRebase: expect.any(Function),
         getConflictState: expect.any(Function),
         previewMerge: expect.any(Function),
+        previewPull: expect.any(Function),
+        previewPush: expect.any(Function),
         previewRebase: expect.any(Function),
         runMerge: expect.any(Function),
         runRebase: expect.any(Function)
@@ -62,6 +64,8 @@ describe("createRepositoryClient", () => {
     await client.getCommitDetails({ commitOid: "abc1234", repositoryPath: "/repo" });
     await client.previewMerge({ repositoryPath: "/repo", sourceBranch: "feature/operation-previews" });
     await client.previewRebase({ repositoryPath: "/repo", targetBranch: "origin/main" });
+    await client.previewPull("/repo");
+    await client.previewPush("/repo");
     await client.runMerge({
       operationId: "operation-merge",
       repositoryPath: "/repo",
@@ -115,6 +119,8 @@ describe("createRepositoryClient", () => {
         command: "preview_merge"
       },
       { args: { repositoryPath: "/repo", targetBranch: "origin/main" }, command: "preview_rebase" },
+      { args: { repositoryPath: "/repo" }, command: "preview_pull" },
+      { args: { repositoryPath: "/repo" }, command: "preview_push" },
       {
         args: { operationId: "operation-merge", repositoryPath: "/repo", sourceBranch: "feature/operation-previews" },
         command: "run_merge"
@@ -162,6 +168,8 @@ describe("browser repository client", () => {
         continueRebase: expect.any(Function),
         getConflictState: expect.any(Function),
         previewMerge: expect.any(Function),
+        previewPull: expect.any(Function),
+        previewPush: expect.any(Function),
         previewRebase: expect.any(Function),
         runMerge: expect.any(Function),
         runRebase: expect.any(Function)
@@ -336,6 +344,44 @@ describe("browser repository client", () => {
       message: "Preview rebase from browser-preview onto origin/main.",
       sourceBranch: "browser-preview",
       targetBranch: "origin/main"
+    });
+    await expect(client.previewPull("/repo")).resolves.toEqual({
+      changedFiles: ["src/app/App.tsx", "src/features/repository/repository-client.ts"],
+      command: "git pull",
+      commits: [
+        {
+          authorEmail: "alex@example.test",
+          authorName: "Alex Rivera",
+          authoredAt: "2026-05-16T09:15:00+02:00",
+          oid: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+          shortOid: "a1b2c3d",
+          subject: "Add repository history view"
+        }
+      ],
+      kind: "pull",
+      likelyConflictFiles: ["src/app/App.tsx"],
+      message: "Preview pull from origin/browser-preview into browser-preview.",
+      sourceBranch: "origin/browser-preview",
+      targetBranch: "browser-preview"
+    });
+    await expect(client.previewPush("/repo")).resolves.toEqual({
+      changedFiles: ["src/app/App.tsx", "src/features/repository/repository-client.ts"],
+      command: "git push",
+      commits: [
+        {
+          authorEmail: "alex@example.test",
+          authorName: "Alex Rivera",
+          authoredAt: "2026-05-16T09:15:00+02:00",
+          oid: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+          shortOid: "a1b2c3d",
+          subject: "Add repository history view"
+        }
+      ],
+      kind: "push",
+      likelyConflictFiles: [],
+      message: "Preview push from browser-preview to origin/browser-preview.",
+      sourceBranch: "browser-preview",
+      targetBranch: "origin/browser-preview"
     });
     await expect(
       client.runMerge({ operationId: "operation-merge", repositoryPath: "/repo", sourceBranch: "feature/demo-branch" })

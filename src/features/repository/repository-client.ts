@@ -105,6 +105,8 @@ export type RepositoryClient = {
   getCommitDetails(args: CommitDetailsArgs): Promise<CommitDetails>;
   previewMerge(args: PreviewMergeArgs): Promise<OperationPreview>;
   previewRebase(args: PreviewRebaseArgs): Promise<OperationPreview>;
+  previewPull(repositoryPath: string): Promise<OperationPreview>;
+  previewPush(repositoryPath: string): Promise<OperationPreview>;
   runMerge(args: QueuedMergeArgs): Promise<GitOperationResult>;
   runRebase(args: QueuedRebaseArgs): Promise<GitOperationResult>;
   abortMerge(args: QueuedRepositoryPathArgs): Promise<GitOperationResult>;
@@ -158,6 +160,12 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
     },
     previewRebase(args) {
       return invokeCommand<OperationPreview>("preview_rebase", args);
+    },
+    previewPull(repositoryPath) {
+      return invokeCommand<OperationPreview>("preview_pull", { repositoryPath });
+    },
+    previewPush(repositoryPath) {
+      return invokeCommand<OperationPreview>("preview_push", { repositoryPath });
     },
     getRepositoryStatus(repositoryPath) {
       return invokeCommand<RepositoryStatus>("get_repository_status", { repositoryPath });
@@ -300,6 +308,29 @@ export function getBrowserRepositoryClient(): RepositoryClient {
           message: `Preview rebase from browser-preview onto ${args.targetBranch}.`,
           sourceBranch: "browser-preview",
           targetBranch: args.targetBranch
+        })
+      );
+    },
+    previewPull() {
+      return Promise.resolve(
+        browserOperationPreview({
+          command: "git pull",
+          kind: "pull",
+          message: "Preview pull from origin/browser-preview into browser-preview.",
+          sourceBranch: "origin/browser-preview",
+          targetBranch: "browser-preview"
+        })
+      );
+    },
+    previewPush() {
+      return Promise.resolve(
+        browserOperationPreview({
+          command: "git push",
+          kind: "push",
+          likelyConflictFiles: [],
+          message: "Preview push from browser-preview to origin/browser-preview.",
+          sourceBranch: "browser-preview",
+          targetBranch: "origin/browser-preview"
         })
       );
     },
@@ -518,6 +549,14 @@ export function previewRebase(args: PreviewRebaseArgs): Promise<OperationPreview
   return repositoryClient.previewRebase(args);
 }
 
+export function previewPull(repositoryPath: string): Promise<OperationPreview> {
+  return repositoryClient.previewPull(repositoryPath);
+}
+
+export function previewPush(repositoryPath: string): Promise<OperationPreview> {
+  return repositoryClient.previewPush(repositoryPath);
+}
+
 export function runMerge(args: QueuedMergeArgs): Promise<GitOperationResult> {
   return repositoryClient.runMerge(args);
 }
@@ -569,6 +608,7 @@ function browserMutationResult(command: string): GitOperationResult {
 function browserOperationPreview(args: {
   command: string;
   kind: OperationPreviewKind;
+  likelyConflictFiles?: string[];
   message: string;
   sourceBranch: string;
   targetBranch: string;
@@ -578,7 +618,7 @@ function browserOperationPreview(args: {
     command: args.command,
     commits: [browserOperationPreviewCommit(browserCommitHistory[0])],
     kind: args.kind,
-    likelyConflictFiles: ["src/app/App.tsx"],
+    likelyConflictFiles: args.likelyConflictFiles ?? ["src/app/App.tsx"],
     message: args.message,
     sourceBranch: args.sourceBranch,
     targetBranch: args.targetBranch
