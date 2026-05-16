@@ -128,3 +128,17 @@
     @apply font-sans;
     }
 }
+
+@layer components {
+  .pierre-diff-viewer {
+    display: block;
+    max-width: 100%;
+    overflow: auto;
+    background: var(--background);
+    --diffs-font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --diffs-font-size: 12px;
+    --diffs-line-height: 20px;
+    --diffs-gap-block: 8px;
+    --diffs-gap-inline: 12px;
+  }
+}

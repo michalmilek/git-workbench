@@ -44,13 +44,15 @@ const repositoryMocks = vi.hoisted(() => ({
     (args: { accountId: string; itemId: string; repositoryPath: string; resolved: boolean; threadId: string }) => Promise<ProviderReviewThreadResolutionResult>
   >(),
   stageFile: vi.fn<(args: { filePath: string; repositoryPath: string }) => Promise<GitOperationResult>>(),
+  stageHunk: vi.fn<(args: { patch: string; repositoryPath: string }) => Promise<GitOperationResult>>(),
   submitProviderReviewComment: vi.fn<
     (args: { accountId: string; body: string; itemId: string; repositoryPath: string; target: ProviderReviewDraftTarget }) => Promise<ProviderReviewSubmitResult>
   >(),
   submitProviderReviewDecision: vi.fn<
     (args: { accountId: string; body?: string | null; decision: ProviderReviewDecision; itemId: string; repositoryPath: string }) => Promise<ProviderReviewDecisionResult>
   >(),
-  unstageFile: vi.fn<(args: { filePath: string; repositoryPath: string }) => Promise<GitOperationResult>>()
+  unstageFile: vi.fn<(args: { filePath: string; repositoryPath: string }) => Promise<GitOperationResult>>(),
+  unstageHunk: vi.fn<(args: { patch: string; repositoryPath: string }) => Promise<GitOperationResult>>()
 }));
 
 const repositoryPickerMocks = vi.hoisted(() => ({
@@ -63,6 +65,16 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn()
+}));
+
+vi.mock("@pierre/diffs/react", () => ({
+  PatchDiff: ({ patch }: { patch: string }) => (
+    <pre data-testid="pierre-diff-viewer">
+      Pierre diff preview
+      {"\n"}
+      {patch}
+    </pre>
+  )
 }));
 
 vi.mock("@/features/repository/repository-picker", async (importOriginal) => {
@@ -151,6 +163,66 @@ describe("App repository health", () => {
     expect(repositoryMocks.getRepositoryStatus).toHaveBeenCalledWith("/work/codex");
     expect(requiredElement<HTMLInputElement>(container.querySelector("#repository-path")).value).toBe("/work/codex");
     expect(container.textContent).toContain("Cloned repository.");
+  });
+
+  test("renders text hunks with Pierre diffs and preserves hunk staging", async () => {
+    const patch = [
+      "diff --git a/src/App.tsx b/src/App.tsx",
+      "index 9daeafb..41b3a72 100644",
+      "--- a/src/App.tsx",
+      "+++ b/src/App.tsx",
+      "@@ -1,3 +1,3 @@",
+      " const label = \"Diff preview\";",
+      "-const enabled = false;",
+      "+const enabled = true;"
+    ].join("\n");
+
+    repositoryMocks.getRepositoryStatus.mockResolvedValue(repositoryStatus({ files: [statusFile({ path: "src/App.tsx" })] }));
+    repositoryMocks.getFileDiff.mockResolvedValue({ isBinary: false, path: "src/App.tsx", text: patch });
+
+    await openRepository(container, "/repo");
+
+    expect(container.querySelectorAll("[data-testid='pierre-diff-viewer']")).toHaveLength(1);
+    expect(container.textContent).toContain("Pierre diff preview");
+    expect(container.textContent).toContain("+const enabled = true;");
+
+    await clickButton(container, "Stage hunk");
+
+    expect(repositoryMocks.stageHunk).toHaveBeenCalledWith({
+      patch: `${patch}\n`,
+      repositoryPath: "/repo"
+    });
+  });
+
+  test("preserves hunk unstaging from the Pierre diff view", async () => {
+    const patch = [
+      "diff --git a/src/App.tsx b/src/App.tsx",
+      "index 41b3a72..9daeafb 100644",
+      "--- a/src/App.tsx",
+      "+++ b/src/App.tsx",
+      "@@ -1,3 +1,3 @@",
+      " const label = \"Diff preview\";",
+      "-const enabled = true;",
+      "+const enabled = false;"
+    ].join("\n");
+
+    repositoryMocks.getRepositoryStatus.mockResolvedValue(
+      repositoryStatus({
+        files: [statusFile({ indexStatus: "modified", path: "src/App.tsx", worktreeStatus: "unmodified" })]
+      })
+    );
+    repositoryMocks.getFileDiff.mockResolvedValue({ isBinary: false, path: "src/App.tsx", text: patch });
+
+    await openRepository(container, "/repo");
+
+    expect(container.querySelectorAll("[data-testid='pierre-diff-viewer']")).toHaveLength(1);
+
+    await clickButton(container, "Unstage hunk");
+
+    expect(repositoryMocks.unstageHunk).toHaveBeenCalledWith({
+      patch: `${patch}\n`,
+      repositoryPath: "/repo"
+    });
   });
 
   test("renders provider-neutral work item details and updates selection", async () => {
@@ -616,6 +688,7 @@ function resetRepositoryMocks() {
     providerResponseUrl: "https://gitlab.company.test/platform/workbench/-/merge_requests/17#thread-inline-1"
   });
   repositoryMocks.stageFile.mockResolvedValue({ command: "git add -- src/App.tsx", stderr: "", stdout: "staged" });
+  repositoryMocks.stageHunk.mockResolvedValue({ command: "git apply --cached", stderr: "", stdout: "staged hunk" });
   repositoryMocks.submitProviderReviewComment.mockResolvedValue({
     command: "POST https://api.github.com/repos/openai/codex/issues/42/comments",
     message: "Submitted provider review comment.",
@@ -629,6 +702,7 @@ function resetRepositoryMocks() {
     providerResponseUrl: "https://github.com/openai/codex/pull/42#pullrequestreview-123"
   });
   repositoryMocks.unstageFile.mockResolvedValue({ command: "git restore --staged -- src/App.tsx", stderr: "", stdout: "unstaged" });
+  repositoryMocks.unstageHunk.mockResolvedValue({ command: "git apply --cached --reverse", stderr: "", stdout: "unstaged hunk" });
   repositoryPickerMocks.selectRepositoryDirectory.mockResolvedValue(null);
 }
 

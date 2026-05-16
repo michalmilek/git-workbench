@@ -38,6 +38,7 @@
   },
   "dependencies": {
     "@fontsource-variable/roboto": "^5.2.10",
+    "@pierre/diffs": "^1.1.22",
     "@tabler/icons-react": "^3.44.0",
     "@tailwindcss/vite": "^4.3.0",
     "@tauri-apps/api": "^2.11.0",
