@@ -5,6 +5,7 @@ import type {
   BranchList,
   FileDiff,
   GitOperationResult,
+  OperationPreview,
   ProviderAccount,
   ProviderConnectionResult,
   ProviderWorkItemList,
@@ -27,6 +28,13 @@ describe("createRepositoryClient", () => {
       return response as T;
     });
 
+    expect(client).toEqual(
+      expect.objectContaining({
+        previewMerge: expect.any(Function),
+        previewRebase: expect.any(Function)
+      })
+    );
+
     await client.getRepositoryStatus("/repo");
     await client.listProviderRemotes("/repo");
     await client.listProviderWorkItems("/repo");
@@ -44,6 +52,8 @@ describe("createRepositoryClient", () => {
     await client.listStashes("/repo");
     await client.listCommitHistory({ query: "feature history", repositoryPath: "/repo" });
     await client.getCommitDetails({ commitOid: "abc1234", repositoryPath: "/repo" });
+    await client.previewMerge({ repositoryPath: "/repo", sourceBranch: "feature/operation-previews" });
+    await client.previewRebase({ repositoryPath: "/repo", targetBranch: "origin/main" });
     await client.createStash({ message: "wip changes", repositoryPath: "/repo" });
     await client.applyStash({ repositoryPath: "/repo", stashRef: "stash@{0}" });
     await client.popStash({ repositoryPath: "/repo", stashRef: "stash@{1}" });
@@ -82,6 +92,11 @@ describe("createRepositoryClient", () => {
       { args: { repositoryPath: "/repo" }, command: "list_stashes" },
       { args: { query: "feature history", repositoryPath: "/repo" }, command: "list_commit_history" },
       { args: { commitOid: "abc1234", repositoryPath: "/repo" }, command: "get_commit_details" },
+      {
+        args: { repositoryPath: "/repo", sourceBranch: "feature/operation-previews" },
+        command: "preview_merge"
+      },
+      { args: { repositoryPath: "/repo", targetBranch: "origin/main" }, command: "preview_rebase" },
       { args: { message: "wip changes", repositoryPath: "/repo" }, command: "create_stash" },
       { args: { repositoryPath: "/repo", stashRef: "stash@{0}" }, command: "apply_stash" },
       { args: { repositoryPath: "/repo", stashRef: "stash@{1}" }, command: "pop_stash" },
@@ -107,6 +122,13 @@ describe("createRepositoryClient", () => {
 describe("browser repository client", () => {
   test("returns demo status and clear mutating operation output", async () => {
     const client = getBrowserRepositoryClient();
+
+    expect(client).toEqual(
+      expect.objectContaining({
+        previewMerge: expect.any(Function),
+        previewRebase: expect.any(Function)
+      })
+    );
 
     await expect(client.getRepositoryStatus("/repo")).resolves.toMatchObject({
       branch: "browser-preview",
@@ -231,6 +253,44 @@ describe("browser repository client", () => {
         }
       ]
     });
+    await expect(client.previewMerge({ repositoryPath: "/repo", sourceBranch: "feature/demo-branch" })).resolves.toEqual({
+      changedFiles: ["src/app/App.tsx", "src/features/repository/repository-client.ts"],
+      command: "git merge feature/demo-branch",
+      commits: [
+        {
+          authorEmail: "alex@example.test",
+          authorName: "Alex Rivera",
+          authoredAt: "2026-05-16T09:15:00+02:00",
+          oid: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+          shortOid: "a1b2c3d",
+          subject: "Add repository history view"
+        }
+      ],
+      kind: "merge",
+      likelyConflictFiles: ["src/app/App.tsx"],
+      message: "Preview merge from feature/demo-branch into browser-preview.",
+      sourceBranch: "feature/demo-branch",
+      targetBranch: "browser-preview"
+    });
+    await expect(client.previewRebase({ repositoryPath: "/repo", targetBranch: "origin/main" })).resolves.toEqual({
+      changedFiles: ["src/app/App.tsx", "src/features/repository/repository-client.ts"],
+      command: "git rebase origin/main",
+      commits: [
+        {
+          authorEmail: "alex@example.test",
+          authorName: "Alex Rivera",
+          authoredAt: "2026-05-16T09:15:00+02:00",
+          oid: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+          shortOid: "a1b2c3d",
+          subject: "Add repository history view"
+        }
+      ],
+      kind: "rebase",
+      likelyConflictFiles: ["src/app/App.tsx"],
+      message: "Preview rebase from browser-preview onto origin/main.",
+      sourceBranch: "browser-preview",
+      targetBranch: "origin/main"
+    });
     await expect(client.checkoutBranch({ branchName: "feature/demo-branch", repositoryPath: "/repo" })).resolves.toEqual({
       command: "git checkout feature/demo-branch",
       stderr: "",
@@ -286,6 +346,7 @@ function responseForCommand(
   | RepositoryStatus
   | FileDiff
   | GitOperationResult
+  | OperationPreview
   | BranchList
   | StashEntry[]
   | ProviderRemoteList

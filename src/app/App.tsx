@@ -5,7 +5,9 @@ import {
   IconFileDiff,
   IconFolderOpen,
   IconGitBranch,
+  IconGitCompare,
   IconGitCommit,
+  IconGitMerge,
   IconGitPullRequest,
   IconHistory,
   IconInbox,
@@ -53,6 +55,8 @@ import {
   listProviderWorkItems,
   listStashes,
   popStash,
+  previewMerge,
+  previewRebase,
   pullRepository,
   pushRepository,
   saveProviderAccount,
@@ -81,6 +85,7 @@ import type {
   DiffMode,
   FileDiff,
   GitOperationResult,
+  OperationPreview,
   ProviderAccount,
   ProviderAccountKind,
   ProviderCheckStatus,
@@ -115,7 +120,7 @@ type OperationFeedback =
   | null;
 
 type SyncAction = "fetch" | "pull" | "push";
-type BranchAction = "checkout-branch" | "create-branch" | "delete-branch";
+type BranchAction = "checkout-branch" | "create-branch" | "delete-branch" | "preview-merge" | "preview-rebase";
 type StashAction = "create-stash" | "apply-stash" | "pop-stash" | "drop-stash";
 type ProviderAccountAction = "save-account" | "delete-account" | "test-account" | null;
 type BusyAction =
@@ -178,6 +183,8 @@ export function App() {
   const [amendCommit, setAmendCommit] = useState(false);
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [branchNameInput, setBranchNameInput] = useState("");
+  const [operationBranch, setOperationBranch] = useState("");
+  const [operationPreview, setOperationPreview] = useState<OperationPreview | null>(null);
   const [stashes, setStashes] = useState<StashEntry[]>([]);
   const [stashMessage, setStashMessage] = useState("");
   const [selectedStashRef, setSelectedStashRef] = useState<string | null>(null);
@@ -193,6 +200,7 @@ export function App() {
   const providerAccountActionRequestId = useRef(0);
   const historyRequestId = useRef(0);
   const commitDetailsRequestId = useRef(0);
+  const operationPreviewRequestId = useRef(0);
   const commandLogId = useRef(0);
 
   const summary = useMemo(() => (status === null ? null : summarizeRepositoryStatus(status)), [status]);
@@ -200,6 +208,8 @@ export function App() {
   const selectedFile = getSelectedFile(status, selectedFilePath);
   const selectedStash = getSelectedStash(stashes, selectedStashRef);
   const selectedCommit = getSelectedCommit(history, selectedCommitOid);
+  const operationBranchOptions = branches.filter((branch) => !branch.current);
+  const selectedOperationBranch = resolveSelectedOperationBranch(operationBranchOptions, operationBranch);
   const selectedFileHasStagedChanges = selectedFile === null ? false : hasStagedChanges(selectedFile);
   const selectedFileHasWorktreeChanges = selectedFile === null ? false : hasWorktreeChanges(selectedFile);
   const canCommit =
@@ -209,6 +219,7 @@ export function App() {
     isCommitSummaryValid(commitSummary) &&
     busyAction === null;
   const canCreateBranch = repositoryPath !== null && branchNameInput.trim().length > 0 && busyAction === null;
+  const canPreviewBranchOperation = repositoryPath !== null && selectedOperationBranch.length > 0 && busyAction === null;
   const canCreateStash = repositoryPath !== null && busyAction === null;
   const canRunSelectedStashOperation = repositoryPath !== null && selectedStash !== null && busyAction === null;
   const canSaveProviderAccount =
@@ -264,6 +275,8 @@ export function App() {
     const repositoryLoadRequest = createRepositoryLoadRequest();
     invalidateDiffRequests();
     invalidateHistoryRequests();
+    invalidateOperationPreviewRequests();
+    setOperationPreview(null);
     const providerRequest = createProviderRequest();
     const providerWorkItemsRequest = createProviderWorkItemsRequest();
     const requestedCommitOid = path === repositoryPath ? selectedCommitOid : null;
@@ -282,6 +295,7 @@ export function App() {
 
       if (switchingRepository) {
         clearHistoryState();
+        clearOperationPreviewState();
         setProviderRemotes([]);
         setProviderWorkItems([]);
         setProviderWorkMessage("");
@@ -317,6 +331,7 @@ export function App() {
       if (!switchingRepository) {
         setDiff(null);
         setBranches([]);
+        clearOperationPreviewState();
         setStashes([]);
         setProviderRemotes([]);
         setProviderLoading(false);
@@ -636,6 +651,8 @@ export function App() {
     }
 
     invalidateDiffRequests();
+    invalidateOperationPreviewRequests();
+    setOperationPreview(null);
     setBusyAction("checkout-branch");
 
     try {
@@ -669,6 +686,7 @@ export function App() {
       setFeedback({ kind: "result", result });
       recordOperationResult("Create branch", result);
       setBranchNameInput("");
+      clearOperationPreviewState();
       await loadRepositoryStatus(repositoryPath, selectedFilePath);
     } catch (error) {
       const operationError = describeOperationError(error);
@@ -690,6 +708,7 @@ export function App() {
       const result = await deleteBranch({ branchName, repositoryPath });
       setFeedback({ kind: "result", result });
       recordOperationResult("Delete branch", result);
+      clearOperationPreviewState();
       await loadRepositoryStatus(repositoryPath, selectedFilePath);
     } catch (error) {
       const operationError = describeOperationError(error);
@@ -697,6 +716,42 @@ export function App() {
       recordOperationError("Delete branch", operationError);
     } finally {
       setBusyAction(null);
+    }
+  }
+
+  async function previewBranchOperation(action: "merge" | "rebase") {
+    if (repositoryPath === null || selectedOperationBranch.length === 0) {
+      return;
+    }
+
+    const branchName = selectedOperationBranch;
+    const requestId = createOperationPreviewRequest();
+    const busyPreviewAction = action === "merge" ? "preview-merge" : "preview-rebase";
+    setOperationPreview(null);
+    setBusyAction(busyPreviewAction);
+
+    try {
+      const preview =
+        action === "merge"
+          ? await previewMerge({ repositoryPath, sourceBranch: branchName })
+          : await previewRebase({ repositoryPath, targetBranch: branchName });
+      if (isCurrentOperationPreviewRequest(requestId)) {
+        setOperationPreview(preview);
+        const result = operationPreviewResult(preview);
+        setFeedback({ kind: "result", result });
+        recordOperationResult(action === "merge" ? "Preview merge" : "Preview rebase", result);
+      }
+    } catch (error) {
+      if (isCurrentOperationPreviewRequest(requestId)) {
+        const operationError = describeOperationError(error);
+        setOperationPreview(null);
+        setFeedback({ kind: "error", error: operationError });
+        recordOperationError(action === "merge" ? "Preview merge" : "Preview rebase", operationError);
+      }
+    } finally {
+      if (isCurrentOperationPreviewRequest(requestId)) {
+        setBusyAction(null);
+      }
     }
   }
 
@@ -963,6 +1018,18 @@ export function App() {
     setCommitDetailsLoading(false);
   }
 
+  function clearOperationPreviewState() {
+    invalidateOperationPreviewRequests();
+    setOperationBranch("");
+    setOperationPreview(null);
+  }
+
+  function selectOperationBranch(branchName: string) {
+    invalidateOperationPreviewRequests();
+    setOperationBranch(branchName);
+    setOperationPreview(null);
+  }
+
   function createReferenceRequest(): number {
     referenceRequestId.current += 1;
     return referenceRequestId.current;
@@ -999,6 +1066,19 @@ export function App() {
     return providerAccountActionRequestId.current === requestId;
   }
 
+  function createOperationPreviewRequest(): number {
+    operationPreviewRequestId.current += 1;
+    return operationPreviewRequestId.current;
+  }
+
+  function isCurrentOperationPreviewRequest(requestId: number): boolean {
+    return operationPreviewRequestId.current === requestId;
+  }
+
+  function invalidateOperationPreviewRequests() {
+    operationPreviewRequestId.current += 1;
+  }
+
   function createHistoryRequest(): number {
     historyRequestId.current += 1;
     return historyRequestId.current;
@@ -1019,8 +1099,8 @@ export function App() {
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <div className="grid min-h-screen grid-cols-[260px_minmax(0,1fr)_340px]">
-        <aside className="flex min-w-0 flex-col border-r bg-muted/30 p-4">
+      <div className="grid min-h-screen grid-cols-1 xl:grid-cols-[260px_minmax(0,1fr)_340px]">
+        <aside className="flex min-w-0 flex-col border-b bg-muted/30 p-4 xl:border-b-0 xl:border-r">
           <form
             className="flex flex-col gap-3"
             onSubmit={(event) => {
@@ -1149,6 +1229,19 @@ export function App() {
                 ))
               )}
             </div>
+
+            <Separator className="my-3" />
+
+            <BranchOperationControls
+              branchOptions={operationBranchOptions}
+              busyAction={busyAction}
+              canPreview={canPreviewBranchOperation}
+              onBranchChange={selectOperationBranch}
+              onPreviewMerge={() => void previewBranchOperation("merge")}
+              onPreviewRebase={() => void previewBranchOperation("rebase")}
+              repositoryOpened={repositoryPath !== null}
+              selectedBranch={selectedOperationBranch}
+            />
           </div>
 
           <nav className="mt-5 flex flex-col gap-1">
@@ -1195,10 +1288,10 @@ export function App() {
           </div>
         </aside>
 
-        <section className="min-w-0 p-6">
+        <section className="min-w-0 p-4 sm:p-6">
           {activeView === "changes" ? (
             <>
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="min-w-0">
               <p className="text-sm text-muted-foreground">Changes</p>
               <h2 className="truncate text-2xl font-semibold">
@@ -1218,7 +1311,7 @@ export function App() {
             </Button>
           </div>
 
-          <div className="mt-5 grid grid-cols-[280px_minmax(0,1fr)] gap-4">
+          <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
             <div className="min-h-[520px] overflow-hidden rounded-md border">
               {status === null ? (
                 <div className="p-4 text-sm text-muted-foreground">Repository status will appear here.</div>
@@ -1319,14 +1412,14 @@ export function App() {
             </>
           ) : activeView === "history" ? (
             <>
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                   <p className="text-sm text-muted-foreground">History</p>
                   <h2 className="truncate text-2xl font-semibold">
                     {repositoryPath === null ? "Open a repository" : `${history.length} commits`}
                   </h2>
                 </div>
-                <div className="flex min-w-[340px] items-center gap-2">
+                <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:min-w-[340px]">
                   <label className="sr-only" htmlFor="history-filter">
                     Filter history
                   </label>
@@ -1353,7 +1446,7 @@ export function App() {
                 </div>
               </div>
 
-              <div className="mt-5 grid grid-cols-[minmax(340px,42%)_minmax(0,1fr)] gap-4">
+              <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(340px,42%)_minmax(0,1fr)]">
                 <div className="min-h-[620px] overflow-hidden rounded-md border">
                   {repositoryPath === null ? (
                     <div className="p-4 text-sm text-muted-foreground">Repository history will appear here.</div>
@@ -1397,7 +1490,7 @@ export function App() {
             </>
           ) : (
             <>
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="min-w-0">
                   <p className="text-sm text-muted-foreground">Stashes</p>
                   <h2 className="truncate text-2xl font-semibold">
@@ -1417,7 +1510,7 @@ export function App() {
                 </Button>
               </div>
 
-              <div className="mt-5 grid grid-cols-[minmax(320px,40%)_minmax(0,1fr)] gap-4">
+              <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(320px,40%)_minmax(0,1fr)]">
                 <div className="min-h-[520px] overflow-hidden rounded-md border">
                   {repositoryPath === null ? (
                     <div className="p-4 text-sm text-muted-foreground">Repository stashes will appear here.</div>
@@ -1528,7 +1621,7 @@ export function App() {
           )}
         </section>
 
-        <aside className="flex min-w-0 flex-col border-l bg-muted/20 p-4">
+        <aside className="flex min-w-0 flex-col border-t bg-muted/20 p-4 xl:border-l xl:border-t-0">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-lg font-semibold">Action panel</h2>
             <Badge variant={repositoryPath === null ? "outline" : "secondary"}>
@@ -1617,6 +1710,8 @@ export function App() {
               </Button>
             </div>
           </div>
+
+          <OperationPreviewPanel preview={operationPreview} repositoryOpened={repositoryPath !== null} />
 
           <ProviderRemotesPanel loading={providerLoading} remotes={providerRemotes} repositoryOpened={repositoryPath !== null} />
 
@@ -1822,6 +1917,14 @@ function chooseSelectedStashRef(stashes: StashEntry[], requestedStashRef: string
   return stashes[0]?.selector ?? null;
 }
 
+function resolveSelectedOperationBranch(branches: BranchInfo[], requestedBranch: string): string {
+  if (requestedBranch.length > 0 && branches.some((branch) => branch.name === requestedBranch)) {
+    return requestedBranch;
+  }
+
+  return branches[0]?.name ?? "";
+}
+
 function getSelectedCommit(commits: CommitSummary[], selectedCommitOid: string | null): CommitSummary | null {
   if (selectedCommitOid === null) {
     return null;
@@ -1868,6 +1971,21 @@ async function runSyncCommand(action: "fetch" | "pull" | "push", repositoryPath:
   }
 
   return pushRepository({ repositoryPath });
+}
+
+function operationPreviewResult(preview: OperationPreview): GitOperationResult {
+  return {
+    command: preview.command,
+    stderr: "",
+    stdout: [
+      preview.message,
+      `Source: ${preview.sourceBranch}`,
+      `Target: ${preview.targetBranch}`,
+      `Commits: ${preview.commits.length}`,
+      `Changed files: ${preview.changedFiles.length}`,
+      `Likely conflicts: ${preview.likelyConflictFiles.length}`
+    ].join("\n")
+  };
 }
 
 async function runStashCommand(
@@ -1924,6 +2042,134 @@ function renderDiffText(diff: FileDiff | null, busyAction: BusyAction): string {
   }
 
   return diff.text.length === 0 ? "No diff output." : diff.text;
+}
+
+function BranchOperationControls({
+  branchOptions,
+  busyAction,
+  canPreview,
+  onBranchChange,
+  onPreviewMerge,
+  onPreviewRebase,
+  repositoryOpened,
+  selectedBranch
+}: {
+  branchOptions: BranchInfo[];
+  busyAction: BusyAction;
+  canPreview: boolean;
+  onBranchChange(branchName: string): void;
+  onPreviewMerge(): void;
+  onPreviewRebase(): void;
+  repositoryOpened: boolean;
+  selectedBranch: string;
+}) {
+  const previewingMerge = busyAction === "preview-merge";
+  const previewingRebase = busyAction === "preview-rebase";
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <IconGitCompare aria-hidden="true" className="size-4 shrink-0" />
+        Operation preview
+      </div>
+      {!repositoryOpened ? (
+        <p className="text-sm text-muted-foreground">No repository</p>
+      ) : branchOptions.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No other branches to preview.</p>
+      ) : (
+        <>
+          <label className="sr-only" htmlFor="operation-branch">
+            Preview branch
+          </label>
+          <select
+            className="h-8 w-full min-w-0 rounded-md border border-input bg-background px-2 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+            disabled={busyAction !== null}
+            id="operation-branch"
+            onChange={(event) => {
+              onBranchChange(event.target.value);
+            }}
+            value={selectedBranch}
+          >
+            {branchOptions.map((branch) => (
+              <option key={`${branch.branchType}:${branch.name}`} value={branch.name}>
+                {branch.name}
+              </option>
+            ))}
+          </select>
+          <div className="grid grid-cols-2 gap-2">
+            <Button disabled={!canPreview} onClick={onPreviewMerge} size="sm" type="button" variant="secondary">
+              <IconGitMerge aria-hidden="true" data-icon="inline-start" />
+              {previewingMerge ? "Previewing" : "Merge"}
+            </Button>
+            <Button disabled={!canPreview} onClick={onPreviewRebase} size="sm" type="button" variant="secondary">
+              <IconGitCompare aria-hidden="true" data-icon="inline-start" />
+              {previewingRebase ? "Previewing" : "Rebase"}
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function OperationPreviewPanel({ preview, repositoryOpened }: { preview: OperationPreview | null; repositoryOpened: boolean }) {
+  return (
+    <div className="mt-4 flex flex-col gap-3 rounded-md border bg-background p-3 text-sm" data-testid="operation-preview-panel">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 font-medium">
+          <IconGitCompare aria-hidden="true" className="size-4 shrink-0" />
+          Preview
+        </div>
+        <Badge variant={preview === null ? "outline" : "secondary"}>{preview === null ? "None" : preview.kind}</Badge>
+      </div>
+
+      {!repositoryOpened ? (
+        <p className="text-sm text-muted-foreground">No repository</p>
+      ) : preview === null ? (
+        <p className="text-sm text-muted-foreground">Select a branch and preview merge or rebase.</p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-[84px_minmax(0,1fr)] gap-x-2 gap-y-1 text-xs">
+            <span className="text-muted-foreground">Source</span>
+            <span className="truncate">{preview.sourceBranch}</span>
+            <span className="text-muted-foreground">Target</span>
+            <span className="truncate">{preview.targetBranch}</span>
+            <span className="text-muted-foreground">Command</span>
+            <code className="truncate rounded bg-muted px-1 py-0.5">{preview.command}</code>
+          </div>
+
+          <p className="text-xs text-muted-foreground">{preview.message}</p>
+
+          <PreviewList label="Commits" values={preview.commits.map((commit) => `${commit.shortOid} ${commit.subject}`)} />
+          <PreviewList label="Changed files" values={preview.changedFiles} />
+          <PreviewList label="Likely conflicts" values={preview.likelyConflictFiles} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PreviewList({ label, values }: { label: string; values: string[] }) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium">{label}</span>
+        <Badge variant="outline">{values.length}</Badge>
+      </div>
+      {values.length === 0 ? (
+        <p className="text-xs text-muted-foreground">None</p>
+      ) : (
+        <div className="max-h-24 overflow-auto rounded-md border bg-muted/30 p-2 text-xs">
+          {values.slice(0, 12).map((value) => (
+            <p className="truncate" key={value}>
+              {value}
+            </p>
+          ))}
+          {values.length > 12 ? <p className="text-muted-foreground">+{values.length - 12} more</p> : null}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ProviderRemotesPanel({

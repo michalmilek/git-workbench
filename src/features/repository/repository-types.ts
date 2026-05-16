@@ -99,6 +99,28 @@ export type GitOperationResult = {
   stderr: string;
 };
 
+export type OperationPreviewKind = "merge" | "rebase";
+
+export type OperationPreviewCommit = {
+  oid: string;
+  shortOid: string;
+  subject: string;
+  authorName: string;
+  authorEmail: string;
+  authoredAt: string;
+};
+
+export type OperationPreview = {
+  kind: OperationPreviewKind;
+  sourceBranch: string;
+  targetBranch: string;
+  command: string;
+  message: string;
+  commits: OperationPreviewCommit[];
+  changedFiles: string[];
+  likelyConflictFiles: string[];
+};
+
 export type DiffMode = "worktree" | "staged";
 
 export type BranchInfo = {

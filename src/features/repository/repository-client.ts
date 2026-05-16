@@ -6,6 +6,9 @@ import type {
   CommitSummary,
   FileDiff,
   GitOperationResult,
+  OperationPreview,
+  OperationPreviewCommit,
+  OperationPreviewKind,
   ProviderAccount,
   ProviderAccountInput,
   ProviderConnectionResult,
@@ -54,6 +57,14 @@ type CommitDetailsArgs = RepositoryPathArgs & {
   commitOid: string;
 };
 
+type PreviewMergeArgs = RepositoryPathArgs & {
+  sourceBranch: string;
+};
+
+type PreviewRebaseArgs = RepositoryPathArgs & {
+  targetBranch: string;
+};
+
 type InvokeCommand = <T>(command: string, args: Record<string, unknown>) => Promise<T>;
 
 export type RepositoryClient = {
@@ -82,6 +93,8 @@ export type RepositoryClient = {
   dropStash(args: StashRefArgs): Promise<GitOperationResult>;
   listCommitHistory(args: CommitHistoryArgs): Promise<CommitSummary[]>;
   getCommitDetails(args: CommitDetailsArgs): Promise<CommitDetails>;
+  previewMerge(args: PreviewMergeArgs): Promise<OperationPreview>;
+  previewRebase(args: PreviewRebaseArgs): Promise<OperationPreview>;
 };
 
 export function createRepositoryClient(invokeCommand: InvokeCommand): RepositoryClient {
@@ -115,6 +128,12 @@ export function createRepositoryClient(invokeCommand: InvokeCommand): Repository
     },
     getCommitDetails(args) {
       return invokeCommand<CommitDetails>("get_commit_details", args);
+    },
+    previewMerge(args) {
+      return invokeCommand<OperationPreview>("preview_merge", args);
+    },
+    previewRebase(args) {
+      return invokeCommand<OperationPreview>("preview_rebase", args);
     },
     getRepositoryStatus(repositoryPath) {
       return invokeCommand<RepositoryStatus>("get_repository_status", { repositoryPath });
@@ -209,6 +228,28 @@ export function getBrowserRepositoryClient(): RepositoryClient {
       const details =
         browserCommitDetails.find((commitDetails) => commitDetails.commit.oid === args.commitOid) ?? browserCommitDetails[0];
       return Promise.resolve(details);
+    },
+    previewMerge(args) {
+      return Promise.resolve(
+        browserOperationPreview({
+          command: `git merge ${args.sourceBranch}`,
+          kind: "merge",
+          message: `Preview merge from ${args.sourceBranch} into browser-preview.`,
+          sourceBranch: args.sourceBranch,
+          targetBranch: "browser-preview"
+        })
+      );
+    },
+    previewRebase(args) {
+      return Promise.resolve(
+        browserOperationPreview({
+          command: `git rebase ${args.targetBranch}`,
+          kind: "rebase",
+          message: `Preview rebase from browser-preview onto ${args.targetBranch}.`,
+          sourceBranch: "browser-preview",
+          targetBranch: args.targetBranch
+        })
+      );
     },
     getRepositoryStatus(repositoryPath) {
       return Promise.resolve({
@@ -407,6 +448,14 @@ export function getCommitDetails(args: CommitDetailsArgs): Promise<CommitDetails
   return repositoryClient.getCommitDetails(args);
 }
 
+export function previewMerge(args: PreviewMergeArgs): Promise<OperationPreview> {
+  return repositoryClient.previewMerge(args);
+}
+
+export function previewRebase(args: PreviewRebaseArgs): Promise<OperationPreview> {
+  return repositoryClient.previewRebase(args);
+}
+
 export function createStash(args: CreateStashArgs): Promise<GitOperationResult> {
   return repositoryClient.createStash(args);
 }
@@ -432,6 +481,36 @@ function browserMutationResult(command: string): GitOperationResult {
     command,
     stderr: "",
     stdout: "Open the app through Tauri to run mutating Git commands."
+  };
+}
+
+function browserOperationPreview(args: {
+  command: string;
+  kind: OperationPreviewKind;
+  message: string;
+  sourceBranch: string;
+  targetBranch: string;
+}): OperationPreview {
+  return {
+    changedFiles: ["src/app/App.tsx", "src/features/repository/repository-client.ts"],
+    command: args.command,
+    commits: [browserOperationPreviewCommit(browserCommitHistory[0])],
+    kind: args.kind,
+    likelyConflictFiles: ["src/app/App.tsx"],
+    message: args.message,
+    sourceBranch: args.sourceBranch,
+    targetBranch: args.targetBranch
+  };
+}
+
+function browserOperationPreviewCommit(commit: CommitSummary): OperationPreviewCommit {
+  return {
+    authorEmail: commit.authorEmail,
+    authorName: commit.authorName,
+    authoredAt: commit.authoredAt,
+    oid: commit.oid,
+    shortOid: commit.shortOid,
+    subject: commit.subject
   };
 }
 

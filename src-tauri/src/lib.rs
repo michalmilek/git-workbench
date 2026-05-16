@@ -20,6 +20,7 @@ mod provider_work_items;
 use git::GitOperationResult;
 use git::branch::BranchList;
 use git::history::{CommitDetails, CommitSummary};
+use git::operation_preview::OperationPreview;
 use git::operations::FileDiff;
 use git::provider::ProviderRemoteList;
 use git::stash::StashEntry;
@@ -97,6 +98,22 @@ fn list_commit_history(
 #[tauri::command]
 fn list_provider_remotes(repository_path: &str) -> Result<ProviderRemoteList, OperationError> {
     git::provider::list_provider_remotes(std::path::Path::new(repository_path))
+}
+
+#[tauri::command]
+fn preview_merge(
+    repository_path: &str,
+    source_branch: &str,
+) -> Result<OperationPreview, OperationError> {
+    git::operation_preview::preview_merge(std::path::Path::new(repository_path), source_branch)
+}
+
+#[tauri::command]
+fn preview_rebase(
+    repository_path: &str,
+    target_branch: &str,
+) -> Result<OperationPreview, OperationError> {
+    git::operation_preview::preview_rebase(std::path::Path::new(repository_path), target_branch)
 }
 
 #[tauri::command]
@@ -186,6 +203,8 @@ pub fn run() -> tauri::Result<()> {
             list_branches,
             list_commit_history,
             list_provider_remotes,
+            preview_merge,
+            preview_rebase,
             get_commit_details,
             checkout_branch,
             create_branch,
